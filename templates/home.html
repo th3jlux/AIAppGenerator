@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=375">
+    <title>Home</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <script>
+async function submitForm() {
+    const spinner = document.getElementById("spinner");
+    spinner.style.display = "block";
+
+    const title = document.getElementById('title').value;
+    const prompt = document.getElementById('prompt').value;
+    const selectedUtility = document.querySelector('input[name="selectedUtility"]:checked');
+
+    if (!title || !prompt) {
+        alert('Both fields are required!');
+        spinner.style.display = 'none';
+        return;
+    }
+
+    let jsonString;
+    if (!selectedUtility) {
+        jsonString = JSON.stringify({ title, prompt });
+    } else {
+        const selectedUtilityValue = selectedUtility.value;
+        jsonString = JSON.stringify({ title, prompt, selectedUtilityValue });
+    }
+
+    try {
+        const response = await fetch('/submit', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: jsonString,
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            console.error('Error:', error);
+        } else {
+            const data = await response.json();
+            console.log('Success:', data);
+        }
+    } catch (error) {
+        console.error('Error:', error);
+    }
+
+    location.reload(); // Reload to reset the form and utilities
+    spinner.style.display = 'none';
+}
+
+async function deleteTool(linkTitle) {
+    const confirmed = confirm(`Are you sure you want to delete the tool: "${linkTitle}"?`);
+    if (!confirmed) return;
+
+    try {
+        const response = await fetch('/delete', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ title: linkTitle }),
+        });
+
+        if (response.ok) {
+            alert(`${linkTitle} deleted successfully!`);
+            location.reload(); // Refresh the page to reflect changes
+        } else {
+            const error = await response.json();
+            alert("Error: " + error.message);
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('An error occurred while deleting the tool.');
+    }
+}
+
+// Add event listeners for radio buttons
+document.addEventListener('DOMContentLoaded', () => {
+    document.querySelectorAll('input[name="selectedUtility"]').forEach(radio => {
+        radio.addEventListener('change', function () {
+            const titleInput = document.getElementById('title');
+            if (this.checked) {
+                const processedTitle = this.value.replace(/^\//, '').replace(/_html$/, '');
+                titleInput.value = processedTitle;
+                titleInput.readOnly = true; // Make the input readonly
+            }
+        });
+    });
+});
+
+function clearSelection() {
+    // Deselect any selected radio button
+    const selectedRadio = document.querySelector('input[name="selectedUtility"]:checked');
+    if (selectedRadio) {
+        selectedRadio.checked = false;
+    }
+
+    // Clear the Title textbox and make it editable
+    const titleInput = document.getElementById('title');
+    titleInput.value = '';
+    titleInput.readOnly = false;
+}
+
+function selectRadioAndOpenForm(index, title) {
+    // Select the radio button
+    const radioButton = document.getElementById(`utility-${index}`);
+    if (radioButton) {
+        radioButton.checked = true; // Programmatically select the radio button
+    }
+
+    // Manually trigger the onchange event
+    const event = new Event('change', { bubbles: true });
+    radioButton.dispatchEvent(event);
+
+    // Call openForm with the title
+    openForm(title);
+}
+
+async function openForm(linkTitle) {
+  try {
+    const trimmed = linkTitle.slice(1, -5); // Adjust the trimming logic if needed
+    const apiRoute = `/get_code?route_name=${trimmed}`;
+
+    const response = await fetch(apiRoute);
+
+    if (response.ok) {
+      const data = await response.json();
+
+      // Populate the Python code field
+      const python_text_field = document.getElementById('python_code');
+      python_text_field.value = data.python_code || "No Python code available.";
+
+      // Populate the HTML code field
+      const html_text_field = document.getElementById('html_code');
+      html_text_field.value = data.html_code || "No HTML code available.";
+    } else {
+      const error = await response.json();
+      alert(error.error || "Failed to retrieve code.");
+    }
+  } catch (error) {
+    console.error('Error:', error);
+    alert('An error occurred while fetching the code.');
+  }
+  document.getElementById("myForm").style.display = "block";
+}
+
+function closeForm() {
+  document.getElementById("myForm").style.display = "none";
+}
+    </script>
+</head>
+<body>
+    <header>
+        <h1>AI App Generator</h1>
+    </header>
+
+    <main>
+        <h2>Your Wish, My Command</h2>
+        <form onsubmit="event.preventDefault(); submitForm();">
+            <label for="title">Title:</label>
+            <input type="text" id="title" name="title" placeholder="Enter the title" required>
+            
+            <label for="prompt">Prompt:</label>
+            <textarea id="prompt" name="prompt" placeholder="Enter the prompt" required></textarea>
+            
+            <button type="submit">Submit</button>
+        </form>
+        <hr>
+
+
+        <div class="form-popup" id="myForm">
+          <form action="/action_page.php" class="form-container">
+            <table>
+                <tr>
+                    <td><label for="python_code"><b>Python Code</b></label></td>
+                    <td><textarea id="python_code" placeholder="python_code" name="python_code" required></textarea></td>
+                </tr>
+                <tr>
+                    <td><label for="html_code"><b>Html Code</b></label></td>
+                    <td><textarea id="html_code" placeholder="html_code" name="html_code" required></textarea></td>
+                </tr>
+            </table>
+            <button type="submit" class="btn">Update</button>
+            <button type="button" class="btn cancel" onclick="closeForm()">Close</button>
+          </form>
+        </div>
+
+        {% if errors %}
+        <div class="error-section">
+            <h3>Errors:</h3>
+            <ul>
+                {% for error in errors %}
+                <li style="color: red;">{{ error }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+
+        <section class="utilities">
+            <h3>Utilities</h3>
+            <ul>
+                {% for link in links %}
+                <li>
+                    <input type="radio" id="utility-{{ loop.index }}" name="selectedUtility" value="{{ link.title }}">
+                    <label for="utility-{{ loop.index }}">
+                        <a href="{{ link.href }}">{{ link.title }}</a>
+                    </label>
+                    <div class="buttons">
+                        <button class="show-code" type="button" onclick="selectRadioAndOpenForm('{{ loop.index }}', '{{ link.title }}')">Show Code</button>
+                        <button class="delete" type="button" onclick="deleteTool('{{ link.title }}')">×</button>
+                    </div>
+                </li>
+                {% endfor %}
+            </ul>
+
+            <button type="button" id="clearSelectionButton" onclick="clearSelection()">Clear Selection</button>
+        </section>
+    </main>
+    <div id="spinner">
+        <div class="spinner-border"></div>
+    </div>
+    <footer>
+        &copy; 2024 Flask App
+    </footer>
+</body>
+</html>
