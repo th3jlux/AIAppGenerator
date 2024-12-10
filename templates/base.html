@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Flask App{% endblock %}</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+
+        {% block content %}{% endblock %}
+
+    <div id="chatbot-container" class="chatbot-collapsed">
+    <button id="chatbot-toggle" onclick="toggleChatbot()" aria-label="Chat with us">
+        <img src="/static/images/chat-icon.svg" alt="Chat Icon" class="chatbot-icon">
+    </button>
+    <div id="chatbot-body">
+
+
+        <label for="utility-home">
+                <a href="/">Home</a>
+        </label>
+        <textarea id="chatInput" placeholder="Ask me for any changes to the page"></textarea>
+        <button onclick="submitChat()">Send</button>
+    </div>
+</div>
+<!-- Spinner Element -->
+    <div id="spinner">
+        <div class="spinner-border"></div>
+    </div>
+
+    <script>
+       function toggleChatbot() {
+    const chatbot = document.getElementById('chatbot-container');
+    chatbot.classList.toggle('chatbot-collapsed');
+    chatbot.classList.toggle('chatbot-expanded');
+}
+
+async function submitChat() {
+    const prompt = document.getElementById("chatInput").value;
+    // Extract the route name from the current URL
+    const currentUrl = window.location.pathname; // Get the path (e.g., /stickynotes_html)
+    const route = currentUrl.replace("_html", "").replace("/", ""); // Remove "_html" and leading "/"
+
+    if (!prompt.trim()) {
+        alert("Please enter a valid prompt.");
+        return;
+    }
+
+    const requestData = {
+        title: route,
+        prompt: prompt
+    };
+
+    const spinner = document.getElementById("spinner");
+
+    try {
+        spinner.style.display = "block"; // Show spinner
+
+        const response = await fetch("/chatbot", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify(requestData)
+        });
+
+        if (response.ok) {
+            alert("Page updated successfully!");
+        } else {
+            const error = await response.json();
+            alert(`Error: ${error.message}`);
+        }
+    } catch (error) {
+        console.error("Error:", error);
+        alert("An error occurred while processing your request.");
+    } finally {
+        spinner.style.display = "none"; // Hide spinner
+    }
+
+    // Clear the input
+    document.getElementById("chatInput").value = "";
+
+    location.reload(); // Reload to reset the form and utilities
+    spinner.style.display = 'none'
+    return "all okay", 200
+}
+
+
+    </script>
+</body>
+</html>
