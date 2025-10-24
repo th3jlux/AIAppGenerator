@@ -3,6 +3,7 @@ import requests
 import yfinance as yf
 import json
 import os
+import locale
 from pathlib import Path
 
 My_Networth_blueprint = Blueprint('My_Networth_blueprint', __name__)
@@ -11,6 +12,33 @@ My_Networth_blueprint = Blueprint('My_Networth_blueprint', __name__)
 DATA_FILE = Path(__file__).parent.parent / 'data' / 'portfolio.json'
 
 from datetime import datetime
+
+def get_currency_locale(currency):
+    """Map currencies to their natural locales for number formatting"""
+    currency_locales = {
+        'INR': 'en_IN',  # Indian format (lakhs, crores): 1,23,456.78
+        'USD': 'en_US',  # US format: 123,456.78
+        'EUR': 'de_DE',  # European format: 123.456,78
+        'TRY': 'tr_TR'   # Turkish format: 123.456,78
+    }
+    return currency_locales.get(currency, 'en_US')
+
+def format_currency_value(value, currency):
+    """Format a number according to its currency's natural format"""
+    try:
+        # Save current locale
+        old_locale = locale.getlocale()
+        # Set locale based on currency
+        locale.setlocale(locale.LC_ALL, get_currency_locale(currency))
+        # Format number
+        formatted = locale.format_string("%.2f", value, grouping=True)
+        # Restore original locale
+        locale.setlocale(locale.LC_ALL, old_locale)
+        return formatted
+    except Exception:
+        # Fallback to basic formatting if locale operations fail
+        return f"{value:,.2f}"
+
 
 def load_portfolio():
     """Load portfolio data from JSON file"""
@@ -462,7 +490,8 @@ def calculate_net_worth():
                            cryptos=cryptos, savings_loans=savings_loans, total_stocks_worth=total_stocks_worth,
                            total_crypto_worth=total_crypto_worth, 
                            total_savings_and_loans=total_savings_and_loans, grand_total_worth=grand_total_worth,
-                           currency=target_currency, last_updated=last_updated_display)
+                           currency=target_currency, last_updated=last_updated_display,
+                           format_currency_value=format_currency_value)
 
 app = Flask(__name__)
 app.register_blueprint(My_Networth_blueprint)

@@ -170,7 +170,7 @@
     <!-- Net worth summary moved to the top -->
     <div class="top-bar">
         <div>
-            <h2>Your Net Worth: <span id="grandTotal">{{ grand_total_worth | round(2) }} {{ currency }}</span></h2>
+            <h2>Your Net Worth: <span id="grandTotal">{{ format_currency_value(grand_total_worth, currency) }} {{ currency }}</span></h2>
             {% if last_updated %}
             <p id="lastUpdated" style="color: #666; font-size: 0.9em; margin:0;">Prices last updated: {{ last_updated }}</p>
             {% else %}
@@ -288,7 +288,7 @@
     <div class="section-header collapsed" data-section="stocks">
         <h3>
             <span class="toggle-icon">▼</span>
-            Stock Portfolio: <span id="totalStocks">{{ total_stocks_worth | round(2) }} {{ currency }}</span>
+            Stock Portfolio: <span id="totalStocks">{{ format_currency_value(total_stocks_worth, currency) }} {{ currency }}</span>
         </h3>
     </div>
     <div class="collapsible-section collapsed" id="stocksSection">
@@ -305,7 +305,7 @@
                 <td>{{ stock[0] }}</td>
                 <td>{{ stock[1] }}</td>
                 <td>{{ stock[2] }}</td>
-                <td>{{ stock[3] | round(2) }}</td>
+                                <td>{{ format_currency_value(stock[3], currency) }}</td>
                 <td>
                     <button type="button" class="edit-btn" data-category="stocks" data-index="{{ loop.index0 }}">Edit</button>
                     <button type="button" class="delete-btn" data-category="stocks" data-index="{{ loop.index0 }}">Delete</button>
@@ -318,7 +318,7 @@
     <div class="section-header collapsed" data-section="cryptos">
         <h3>
             <span class="toggle-icon">▼</span>
-            Cryptocurrency Portfolio: <span id="totalCryptos">{{ total_crypto_worth | round(2) }} {{ currency }}</span>
+            Cryptocurrency Portfolio: <span id="totalCryptos">{{ format_currency_value(total_crypto_worth, currency) }} {{ currency }}</span>
         </h3>
     </div>
     <div class="collapsible-section collapsed" id="cryptosSection">
@@ -335,7 +335,7 @@
                 <td>{{ crypto[0] }}</td>
                 <td>{{ crypto[1] }}</td>
                 <td>{{ crypto[2] }}</td>
-                <td>{{ crypto[3] | round(2) }}</td>
+                <td>{{ '{:,.2f}'.format(crypto[3]) }}</td>
                 <td>
                     <button type="button" class="edit-btn" data-category="cryptos" data-index="{{ loop.index0 }}">Edit</button>
                     <button type="button" class="delete-btn" data-category="cryptos" data-index="{{ loop.index0 }}">Delete</button>
@@ -348,7 +348,7 @@
     <div class="section-header collapsed" data-section="savings">
         <h3>
             <span class="toggle-icon">▼</span>
-            Savings and Loans: <span id="totalSavings">{{ total_savings_and_loans | round(2) }} {{ currency }}</span>
+            Savings and Loans: <span id="totalSavings">{{ format_currency_value(total_savings_and_loans, currency) }} {{ currency }}</span>
         </h3>
     </div>
     <div class="collapsible-section collapsed" id="savingsSection">
@@ -365,7 +365,7 @@
                 <td>{{ sl[0] }}</td>
                 <td>{{ sl[1] }}</td>
                 <td>{{ sl[2] }}</td>
-                <td>{{ sl[3] | round(2) }}</td>
+                <td>{{ '{:,.2f}'.format(sl[3]) }}</td>
                 <td>
                     <button type="button" class="edit-btn" data-category="savings_loans" data-index="{{ loop.index0 }}">Edit</button>
                     <button type="button" class="delete-btn" data-category="savings_loans" data-index="{{ loop.index0 }}">Delete</button>
@@ -410,9 +410,18 @@
                     while (table.rows.length > 1) table.deleteRow(1);
                     rows.forEach((r, idx) => {
                         const tr = table.insertRow();
-                        r.forEach(cell => {
+                        r.forEach((cell, cellIndex) => {
                             const td = tr.insertCell();
-                            td.textContent = (typeof cell === 'number') ? Number(cell).toFixed(2) : cell;
+                            if (typeof cell === 'number') {
+                                // Format numbers with locale-specific separators for the Value column
+                                if (cellIndex === 3) { // Value column
+                                    td.textContent = formatNumber(cell, data.currency);
+                                } else {
+                                    td.textContent = Number(cell).toFixed(2);
+                                }
+                            } else {
+                                td.textContent = cell;
+                            }
                         });
                         // actions cell
                         const actionCell = tr.insertCell();
@@ -439,11 +448,47 @@
                 // savings_loans rows: [name, value, currency, convertedValue]
                 renderTable('savingsTable', data.savings_loans || [], 'savings_loans');
 
-                // Totals
-                document.getElementById('totalStocks').textContent = '' + (data.totals.stocks || 0).toFixed(2) + ' ' + data.currency;
-                document.getElementById('totalCryptos').textContent = '' + (data.totals.cryptos || 0).toFixed(2) + ' ' + data.currency;
-                document.getElementById('totalSavings').textContent = '' + (data.totals.savings_loans || 0).toFixed(2) + ' ' + data.currency;
-                document.getElementById('grandTotal').textContent = (data.totals.grand_total || 0).toFixed(2) + ' ' + data.currency;
+                    // Format number according to currency's natural locale
+                    function formatCurrency(value, currency) {
+                        // Map currencies to their natural locales for appropriate number formatting
+                        const currencyLocales = {
+                            'INR': 'en-IN',  // Indian format (lakhs, crores): 1,23,456.78
+                            'USD': 'en-US',  // US format: 123,456.78
+                            'EUR': 'de-DE',  // European format: 123.456,78
+                            'TRY': 'tr-TR'   // Turkish format: 123.456,78
+                        };
+                        
+                        // Use currency's natural locale, fall back to US format
+                        const locale = currencyLocales[currency] || 'en-US';
+                        
+                        return new Intl.NumberFormat(locale, {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                            useGrouping: true
+                        }).format(value) + ' ' + currency;
+                    }
+
+                    // Format just the number without currency for table cells
+                    function formatNumber(value, currency) {
+                        const currencyLocales = {
+                            'INR': 'en-IN',
+                            'USD': 'en-US',
+                            'EUR': 'de-DE',
+                            'TRY': 'tr-TR'
+                        };
+                        const locale = currencyLocales[currency] || 'en-US';
+                        return new Intl.NumberFormat(locale, {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                            useGrouping: true
+                        }).format(value);
+                    }
+
+                    // Totals
+                    document.getElementById('totalStocks').textContent = formatCurrency(data.totals.stocks || 0, data.currency);
+                    document.getElementById('totalCryptos').textContent = formatCurrency(data.totals.cryptos || 0, data.currency);
+                    document.getElementById('totalSavings').textContent = formatCurrency(data.totals.savings_loans || 0, data.currency);
+                    document.getElementById('grandTotal').textContent = formatCurrency(data.totals.grand_total || 0, data.currency);
             } catch (err) {
                 console.debug('Could not fetch portfolio', err);
             }
