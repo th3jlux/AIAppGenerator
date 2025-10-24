@@ -64,6 +64,38 @@
             background-color: #f2f2f2;
             text-align: left;
         }
+        .top-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+        .controls {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .btn {
+            padding: 8px 12px;
+            border-radius: 6px;
+            border: none;
+            background: #4CAF50;
+            color: #fff;
+            cursor: pointer;
+            font-weight: 600;
+        }
+        .btn.secondary {
+            background: #666;
+        }
+        .btn.danger {
+            background: #e04848;
+        }
+        select, input[type="text"], textarea {
+            border-radius: 6px;
+            border: 1px solid #ccc;
+            padding: 8px;
+        }
     </style>
 </head>
 <body>
@@ -71,17 +103,26 @@
     <h1>Net Worth Calculator</h1>
 
     <!-- Net worth summary moved to the top -->
-    <h2>Your Net Worth</h2>
-    {% if last_updated %}
-    <p id="lastUpdated" style="color: #666; font-size: 0.9em;">Prices last updated: {{ last_updated }}</p>
-    {% else %}
-    <p id="lastUpdated" style="color: #666; font-size: 0.9em; display:none;"></p>
-    {% endif %}
-
-    <h3>Grand Total Net Worth:</h3>
-    <p id="grandTotal">{{ grand_total_worth | round(2) }} {{ currency }}</p>
-
-    <button type="button" id="refreshButton" style="margin-bottom:12px;">Refresh Prices</button>
+    <div class="top-bar">
+        <div>
+            <h2>Your Net Worth: <span id="grandTotal">{{ grand_total_worth | round(2) }} {{ currency }}</span></h2>
+            {% if last_updated %}
+            <p id="lastUpdated" style="color: #666; font-size: 0.9em; margin:0;">Prices last updated: {{ last_updated }}</p>
+            {% else %}
+            <p id="lastUpdated" style="color: #666; font-size: 0.9em; display:none; margin:0;"></p>
+            {% endif %}
+        </div>
+        <div class="controls">
+            <label for="currency" style="font-weight:600;">Currency</label>
+            <select name="currency" id="currency">
+                <option value="USD">USD</option>
+                <option value="INR">INR</option>
+                <option value="EUR">EUR</option>
+                <option value="TRY">TRY</option>
+            </select>
+            <button type="button" id="refreshButton" class="btn">Refresh Prices</button>
+        </div>
+    </div>
 
     <form method="POST" id="netWorthForm">
         <label for="stocks">Stocks (one per line — e.g., AMZN, 100):</label>
@@ -93,16 +134,10 @@
         <label for="savings_loans">Savings and Loans (one per line — e.g., ING Bank, 50000, EUR):</label>
         <textarea name="savings_loans" id="savings_loans" rows="4" placeholder="Add savings and loans..."></textarea>
 
-        <label for="currency">Select Currency:</label>
-        <select name="currency" id="currency">
-            <option value="USD">USD</option>
-            <option value="INR">INR</option>
-            <option value="EUR">EUR</option>
-            <option value="TRY">TRY</option>
-        </select>
-
-        <button type="submit">Add to Portfolio</button>
-        <button type="button" onclick="clearPortfolio()" style="background-color: #ff4444;">Clear Portfolio</button>
+        <div style="display:flex; gap:8px; margin-top:8px;">
+            <button type="submit" class="btn">Add to Portfolio</button>
+            <button type="button" class="btn danger" onclick="clearPortfolio()">Clear Portfolio</button>
+        </div>
     </form>
 
     <script>
@@ -177,14 +212,7 @@
     </div>
     {% endif %}
 
-    <h2>Your Net Worth</h2>
-    {% if last_updated %}
-    <p id="lastUpdated" style="color: #666; font-size: 0.9em;">Prices last updated: {{ last_updated }}</p>
-    {% else %}
-    <p id="lastUpdated" style="color: #666; font-size: 0.9em; display:none;"></p>
-    {% endif %}
-
-    <h3>Stock Portfolio:</h3>
+    <h3>Stock Portfolio: <span id="totalStocks">{{ total_stocks_worth | round(2) }} {{ currency }}</span></h3>
     <table id="stocksTable">
         <tr>
             <th>Symbol</th>
@@ -206,9 +234,9 @@
         </tr>
         {% endfor %}
     </table>
-    <p id="totalStocks">Total Stocks Value: {{ total_stocks_worth | round(2) }} {{ currency }}</p>
+    <!-- total shown inline next to heading -->
 
-    <h3>Cryptocurrency Portfolio:</h3>
+    <h3>Cryptocurrency Portfolio: <span id="totalCryptos">{{ total_crypto_worth | round(2) }} {{ currency }}</span></h3>
     <table id="cryptosTable">
         <tr>
             <th>Symbol</th>
@@ -230,9 +258,9 @@
         </tr>
         {% endfor %}
     </table>
-    <p id="totalCryptos">Total Cryptos Value: {{ total_crypto_worth | round(2) }} {{ currency }}</p>
+    <!-- total shown inline next to heading -->
 
-    <h3>Savings and Loans:</h3>
+    <h3>Savings and Loans: <span id="totalSavings">{{ total_savings_and_loans | round(2) }} {{ currency }}</span></h3>
     <table id="savingsTable">
         <tr>
             <th>Name</th>
@@ -254,16 +282,17 @@
         </tr>
         {% endfor %}
     </table>
-    <p id="totalSavings">Total Savings and Loans Value: {{ total_savings_and_loans | round(2) }} {{ currency }}</p>
+    <!-- total shown inline next to heading -->
 
-    <h3>Grand Total Net Worth:</h3>
-    <p id="grandTotal">{{ grand_total_worth | round(2) }} {{ currency }}</p>
+    <!-- Grand total shown at top -->
 
     <script>
         // Poll the server for updated portfolio data and update the page without reloading
         async function fetchPortfolioAndUpdate() {
             try {
-                const res = await fetch('/api/portfolio');
+                const sel = document.getElementById('currency');
+                const cur = sel ? sel.value : '{{ currency }}';
+                const res = await fetch('/api/portfolio?currency=' + encodeURIComponent(cur));
                 if (!res.ok) return;
                 const data = await res.json();
 
@@ -291,11 +320,16 @@
                         const editBtn = document.createElement('button');
                         editBtn.type = 'button';
                         editBtn.textContent = 'Edit';
-                        editBtn.onclick = () => editEntry(category, idx);
+                        // use data attributes so delegated handler can pick it up
+                        editBtn.className = 'edit-btn';
+                        editBtn.dataset.category = category;
+                        editBtn.dataset.index = idx;
                         const delBtn = document.createElement('button');
                         delBtn.type = 'button';
                         delBtn.textContent = 'Delete';
-                        delBtn.onclick = () => deleteEntry(category, idx);
+                        delBtn.className = 'delete-btn';
+                        delBtn.dataset.category = category;
+                        delBtn.dataset.index = idx;
                         actionCell.appendChild(editBtn);
                         actionCell.appendChild(document.createTextNode(' '));
                         actionCell.appendChild(delBtn);
@@ -307,9 +341,9 @@
                 renderTable('savingsTable', data.savings_loans || [], 'savings_loans');
 
                 // Totals
-                document.getElementById('totalStocks').textContent = 'Total Stocks Value: ' + (data.totals.stocks || 0).toFixed(2) + ' ' + data.currency;
-                document.getElementById('totalCryptos').textContent = 'Total Cryptos Value: ' + (data.totals.cryptos || 0).toFixed(2) + ' ' + data.currency;
-                document.getElementById('totalSavings').textContent = 'Total Savings and Loans Value: ' + (data.totals.savings_loans || 0).toFixed(2) + ' ' + data.currency;
+                document.getElementById('totalStocks').textContent = '' + (data.totals.stocks || 0).toFixed(2) + ' ' + data.currency;
+                document.getElementById('totalCryptos').textContent = '' + (data.totals.cryptos || 0).toFixed(2) + ' ' + data.currency;
+                document.getElementById('totalSavings').textContent = '' + (data.totals.savings_loans || 0).toFixed(2) + ' ' + data.currency;
                 document.getElementById('grandTotal').textContent = (data.totals.grand_total || 0).toFixed(2) + ' ' + data.currency;
             } catch (err) {
                 console.debug('Could not fetch portfolio', err);
@@ -381,7 +415,7 @@
             showEditModal(category, index, defaults);
         }
 
-        // Modal save handler
+    // Modal save handler
         document.addEventListener('DOMContentLoaded', function () {
             const modal = document.getElementById('editModal');
             const saveBtn = document.getElementById('editSave');
@@ -411,6 +445,30 @@
                 }
             });
             cancelBtn.addEventListener('click', () => { modal.style.display = 'none'; });
+        });
+
+        // Delegate clicks on edit/delete buttons (works for server-rendered and client-rendered rows)
+        document.addEventListener('click', function (e) {
+            const btn = e.target.closest('button');
+            if (!btn) return;
+            if (btn.classList.contains('edit-btn')) {
+                const category = btn.dataset.category;
+                const index = parseInt(btn.dataset.index, 10);
+                editEntry(category, index);
+            } else if (btn.classList.contains('delete-btn')) {
+                const category = btn.dataset.category;
+                const index = parseInt(btn.dataset.index, 10);
+                deleteEntry(category, index);
+            }
+        });
+
+        // When user changes the currency dropdown, re-fetch portfolio in that currency immediately
+        document.addEventListener('DOMContentLoaded', function () {
+            const sel = document.getElementById('currency');
+            if (sel) {
+                try { sel.value = '{{ currency }}'; } catch (e) {}
+                sel.addEventListener('change', () => fetchPortfolioAndUpdate());
+            }
         });
 
         // Start polling every 30 seconds, and once immediately

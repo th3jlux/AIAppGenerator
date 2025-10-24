@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, Blueprint, jsonify
+from flask import Flask, render_template, request, Blueprint, jsonify, redirect, url_for
 import requests
 import yfinance as yf
 import json
@@ -168,6 +168,17 @@ def api_portfolio():
     total_savings_and_loans = sum(item[3] for item in savings_out) if savings_out else 0
     grand_total_worth = total_stocks_worth + total_crypto_worth + total_savings_and_loans
 
+    # Format last_updated for display (drop seconds)
+    lu = portfolio_data.get('last_updated')
+    if lu:
+        try:
+            lu_dt = datetime.strptime(lu, "%Y-%m-%d %H:%M:%S")
+            last_updated_display = lu_dt.strftime("%Y-%m-%d %H:%M")
+        except Exception:
+            last_updated_display = lu
+    else:
+        last_updated_display = None
+
     payload = {
         'stocks': stocks_out,
         'cryptos': cryptos_out,
@@ -179,7 +190,7 @@ def api_portfolio():
             'grand_total': grand_total_worth
         },
         'currency': display_currency,
-        'last_updated': portfolio_data.get('last_updated'),
+        'last_updated': last_updated_display,
         'errors': errors
     }
     return jsonify(payload)
@@ -414,6 +425,10 @@ def calculate_net_worth():
             total_savings_and_loans = sum(sl[3] for sl in savings_loans)
             grand_total_worth = total_stocks_worth + total_crypto_worth + total_savings_and_loans
 
+            # If there were no errors, use POST-Redirect-GET to avoid duplicate submissions on refresh
+            if not errors:
+                return redirect(url_for('My_Networth_blueprint.calculate_net_worth'))
+
         except Exception as e:
             errors.append(f"An error occurred: {str(e)}")
 
@@ -432,11 +447,22 @@ def calculate_net_worth():
     total_savings_and_loans = sum(sl[3] for sl in savings_loans)
     grand_total_worth = total_stocks_worth + total_crypto_worth + total_savings_and_loans
 
+    # Format last_updated for display (drop seconds)
+    lu = portfolio_data.get('last_updated')
+    if lu:
+        try:
+            lu_dt = datetime.strptime(lu, "%Y-%m-%d %H:%M:%S")
+            last_updated_display = lu_dt.strftime("%Y-%m-%d %H:%M")
+        except Exception:
+            last_updated_display = lu
+    else:
+        last_updated_display = None
+
     return render_template('My_Networth_html.html', errors=errors, stocks=stocks, 
                            cryptos=cryptos, savings_loans=savings_loans, total_stocks_worth=total_stocks_worth,
                            total_crypto_worth=total_crypto_worth, 
                            total_savings_and_loans=total_savings_and_loans, grand_total_worth=grand_total_worth,
-                           currency=target_currency, last_updated=portfolio_data.get('last_updated'))
+                           currency=target_currency, last_updated=last_updated_display)
 
 app = Flask(__name__)
 app.register_blueprint(My_Networth_blueprint)
