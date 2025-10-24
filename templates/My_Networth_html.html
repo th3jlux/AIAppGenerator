@@ -398,6 +398,14 @@
                 function renderTable(tableId, rows, category) {
                     const table = document.getElementById(tableId);
                     if (!table) return;
+                    
+                    // Update the Value column header to show current currency
+                    const headerRow = table.rows[0];
+                    const valueTh = Array.from(headerRow.cells).find(cell => cell.textContent.startsWith('Value ('));
+                    if (valueTh) {
+                        valueTh.textContent = `Value (${data.currency})`;
+                    }
+
                     // Keep header row, remove others
                     while (table.rows.length > 1) table.deleteRow(1);
                     rows.forEach((r, idx) => {
