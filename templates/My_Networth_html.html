@@ -96,6 +96,68 @@
             border: 1px solid #ccc;
             padding: 8px;
         }
+        .section-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            cursor: pointer;
+            padding: 8px;
+            background: #f8f8f8;
+            border-radius: 6px;
+            margin: 12px 0;
+            user-select: none;
+        }
+        .section-header:hover {
+            background: #f0f0f0;
+        }
+        .section-header h3 {
+            margin: 0;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .section-header .toggle-icon {
+            transition: transform 0.2s;
+            font-size: 24px;
+            color: #666;
+            width: 24px;
+            height: 24px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .section-header.collapsed .toggle-icon {
+            transform: rotate(-90deg);
+        }
+        .collapsible-section {
+            transition: max-height 0.3s ease-out;
+            overflow: hidden;
+            max-height: 2000px;
+        }
+        .collapsible-section.collapsed {
+            max-height: 0;
+        }
+        #addformSection {
+            background: #fff;
+            padding: 16px;
+            border-radius: 6px;
+            border: 1px solid #e0e0e0;
+            margin-bottom: 24px;
+        }
+        #addformSection form {
+            margin: 0;
+        }
+        #addformSection label {
+            display: block;
+            margin-top: 12px;
+            margin-bottom: 4px;
+            font-weight: 600;
+            color: #444;
+        }
+        #addformSection textarea {
+            width: 100%;
+            margin-bottom: 8px;
+        }
     </style>
 </head>
 <body>
@@ -124,21 +186,29 @@
         </div>
     </div>
 
-    <form method="POST" id="netWorthForm">
-        <label for="stocks">Stocks (one per line — e.g., AMZN, 100):</label>
-        <textarea name="stocks" id="stocks" rows="4" placeholder="Add stocks..."></textarea>
+    <div class="section-header" data-section="addform">
+        <h3>
+            <span class="toggle-icon">▼</span>
+            Add to Portfolio
+        </h3>
+    </div>
+    <div class="collapsible-section" id="addformSection">
+        <form method="POST" id="netWorthForm">
+            <label for="stocks">Stocks (one per line — e.g., AMZN, 100):</label>
+            <textarea name="stocks" id="stocks" rows="4" placeholder="Add stocks..."></textarea>
 
-        <label for="cryptos">Cryptocurrencies (one per line — e.g., BTC, 0.5):</label>
-        <textarea name="cryptos" id="cryptos" rows="4" placeholder="Add cryptocurrencies..."></textarea>
+            <label for="cryptos">Cryptocurrencies (one per line — e.g., BTC, 0.5):</label>
+            <textarea name="cryptos" id="cryptos" rows="4" placeholder="Add cryptocurrencies..."></textarea>
 
-        <label for="savings_loans">Savings and Loans (one per line — e.g., ING Bank, 50000, EUR):</label>
-        <textarea name="savings_loans" id="savings_loans" rows="4" placeholder="Add savings and loans..."></textarea>
+            <label for="savings_loans">Savings and Loans (one per line — e.g., ING Bank, 50000, EUR):</label>
+            <textarea name="savings_loans" id="savings_loans" rows="4" placeholder="Add savings and loans..."></textarea>
 
-        <div style="display:flex; gap:8px; margin-top:8px;">
-            <button type="submit" class="btn">Add to Portfolio</button>
-            <button type="button" class="btn danger" onclick="clearPortfolio()">Clear Portfolio</button>
-        </div>
-    </form>
+            <div style="display:flex; gap:8px; margin-top:8px;">
+                <button type="submit" class="btn">Add to Portfolio</button>
+                <button type="button" class="btn danger" onclick="clearPortfolio()">Clear Portfolio</button>
+            </div>
+        </form>
+    </div>
 
     <script>
         function clearPortfolio() {
@@ -212,77 +282,95 @@
     </div>
     {% endif %}
 
-    <h3>Stock Portfolio: <span id="totalStocks">{{ total_stocks_worth | round(2) }} {{ currency }}</span></h3>
-    <table id="stocksTable">
-        <tr>
-            <th>Symbol</th>
-            <th>Quantity</th>
-            <th>Currency</th>
-            <th>Value ({{ currency }})</th>
-            <th>Actions</th>
-        </tr>
-        {% for stock in stocks %}
-        <tr>
-            <td>{{ stock[0] }}</td>
-            <td>{{ stock[1] }}</td>
-            <td>{{ stock[2] }}</td>
-            <td>{{ stock[3] | round(2) }}</td>
-            <td>
-                <button type="button" class="edit-btn" data-category="stocks" data-index="{{ loop.index0 }}">Edit</button>
-                <button type="button" class="delete-btn" data-category="stocks" data-index="{{ loop.index0 }}">Delete</button>
-            </td>
-        </tr>
-        {% endfor %}
-    </table>
-    <!-- total shown inline next to heading -->
+    <div class="section-header" data-section="stocks">
+        <h3>
+            <span class="toggle-icon">▼</span>
+            Stock Portfolio: <span id="totalStocks">{{ total_stocks_worth | round(2) }} {{ currency }}</span>
+        </h3>
+    </div>
+    <div class="collapsible-section" id="stocksSection">
+        <table id="stocksTable">
+            <tr>
+                <th>Symbol</th>
+                <th>Quantity</th>
+                <th>Currency</th>
+                <th>Value ({{ currency }})</th>
+                <th>Actions</th>
+            </tr>
+            {% for stock in stocks %}
+            <tr>
+                <td>{{ stock[0] }}</td>
+                <td>{{ stock[1] }}</td>
+                <td>{{ stock[2] }}</td>
+                <td>{{ stock[3] | round(2) }}</td>
+                <td>
+                    <button type="button" class="edit-btn" data-category="stocks" data-index="{{ loop.index0 }}">Edit</button>
+                    <button type="button" class="delete-btn" data-category="stocks" data-index="{{ loop.index0 }}">Delete</button>
+                </td>
+            </tr>
+            {% endfor %}
+        </table>
+    </div>
 
-    <h3>Cryptocurrency Portfolio: <span id="totalCryptos">{{ total_crypto_worth | round(2) }} {{ currency }}</span></h3>
-    <table id="cryptosTable">
-        <tr>
-            <th>Symbol</th>
-            <th>Quantity</th>
-            <th>Currency</th>
-            <th>Value ({{ currency }})</th>
-            <th>Actions</th>
-        </tr>
-        {% for crypto in cryptos %}
-        <tr>
-            <td>{{ crypto[0] }}</td>
-            <td>{{ crypto[1] }}</td>
-            <td>{{ crypto[2] }}</td>
-            <td>{{ crypto[3] | round(2) }}</td>
-            <td>
-                <button type="button" class="edit-btn" data-category="cryptos" data-index="{{ loop.index0 }}">Edit</button>
-                <button type="button" class="delete-btn" data-category="cryptos" data-index="{{ loop.index0 }}">Delete</button>
-            </td>
-        </tr>
-        {% endfor %}
-    </table>
-    <!-- total shown inline next to heading -->
+    <div class="section-header" data-section="cryptos">
+        <h3>
+            <span class="toggle-icon">▼</span>
+            Cryptocurrency Portfolio: <span id="totalCryptos">{{ total_crypto_worth | round(2) }} {{ currency }}</span>
+        </h3>
+    </div>
+    <div class="collapsible-section" id="cryptosSection">
+        <table id="cryptosTable">
+            <tr>
+                <th>Symbol</th>
+                <th>Quantity</th>
+                <th>Currency</th>
+                <th>Value ({{ currency }})</th>
+                <th>Actions</th>
+            </tr>
+            {% for crypto in cryptos %}
+            <tr>
+                <td>{{ crypto[0] }}</td>
+                <td>{{ crypto[1] }}</td>
+                <td>{{ crypto[2] }}</td>
+                <td>{{ crypto[3] | round(2) }}</td>
+                <td>
+                    <button type="button" class="edit-btn" data-category="cryptos" data-index="{{ loop.index0 }}">Edit</button>
+                    <button type="button" class="delete-btn" data-category="cryptos" data-index="{{ loop.index0 }}">Delete</button>
+                </td>
+            </tr>
+            {% endfor %}
+        </table>
+    </div>
 
-    <h3>Savings and Loans: <span id="totalSavings">{{ total_savings_and_loans | round(2) }} {{ currency }}</span></h3>
-    <table id="savingsTable">
-        <tr>
-            <th>Name</th>
-            <th>Value</th>
-            <th>Currency</th>
-            <th>Value ({{ currency }})</th>
-            <th>Actions</th>
-        </tr>
-        {% for sl in savings_loans %}
-        <tr>
-            <td>{{ sl[0] }}</td>
-            <td>{{ sl[1] }}</td>
-            <td>{{ sl[2] }}</td>
-            <td>{{ sl[3] | round(2) }}</td>
-            <td>
-                <button type="button" class="edit-btn" data-category="savings_loans" data-index="{{ loop.index0 }}">Edit</button>
-                <button type="button" class="delete-btn" data-category="savings_loans" data-index="{{ loop.index0 }}">Delete</button>
-            </td>
-        </tr>
-        {% endfor %}
-    </table>
-    <!-- total shown inline next to heading -->
+    <div class="section-header" data-section="savings">
+        <h3>
+            <span class="toggle-icon">▼</span>
+            Savings and Loans: <span id="totalSavings">{{ total_savings_and_loans | round(2) }} {{ currency }}</span>
+        </h3>
+    </div>
+    <div class="collapsible-section" id="savingsSection">
+        <table id="savingsTable">
+            <tr>
+                <th>Name</th>
+                <th>Value</th>
+                <th>Currency</th>
+                <th>Value ({{ currency }})</th>
+                <th>Actions</th>
+            </tr>
+            {% for sl in savings_loans %}
+            <tr>
+                <td>{{ sl[0] }}</td>
+                <td>{{ sl[1] }}</td>
+                <td>{{ sl[2] }}</td>
+                <td>{{ sl[3] | round(2) }}</td>
+                <td>
+                    <button type="button" class="edit-btn" data-category="savings_loans" data-index="{{ loop.index0 }}">Edit</button>
+                    <button type="button" class="delete-btn" data-category="savings_loans" data-index="{{ loop.index0 }}">Delete</button>
+                </td>
+            </tr>
+            {% endfor %}
+        </table>
+    </div>
 
     <!-- Grand total shown at top -->
 
@@ -469,6 +557,24 @@
                 try { sel.value = '{{ currency }}'; } catch (e) {}
                 sel.addEventListener('change', () => fetchPortfolioAndUpdate());
             }
+        });
+
+        // Handle collapsible sections
+        document.addEventListener('DOMContentLoaded', function() {
+            // Get all section headers
+            const headers = document.querySelectorAll('.section-header');
+            
+            // Add click handlers to each header
+            headers.forEach(header => {
+                const section = header.getAttribute('data-section');
+                const content = document.getElementById(section + 'Section');
+                
+                // Set initial state - expanded
+                header.addEventListener('click', () => {
+                    header.classList.toggle('collapsed');
+                    content.classList.toggle('collapsed');
+                });
+            });
         });
 
         // Start polling every 30 seconds, and once immediately
