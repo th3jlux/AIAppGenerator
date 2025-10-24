@@ -1,2 +1,8 @@
 [
+    {
+        "bluePrint": "My_Networth_blueprint",
+        "href": "/My_Networth_html",
+        "template": "My_Networth_html.html",
+        "python_file": "My_Networth_python.py"
+    }
 ]

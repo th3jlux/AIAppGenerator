@@ -1,0 +1,424 @@
+
+{% extends "base.html" %}
+{% block content %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Net Worth Calculator</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f4f9;
+            color: #333;
+            margin: 0;
+            padding: 0;
+        }
+        .container {
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background-color: white;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            border-radius: 8px;
+        }
+        h1, h2 {
+            color: #4CAF50;
+        }
+        form {
+            display: flex;
+            flex-direction: column;
+        }
+        textarea, select, button {
+            margin: 10px 0;
+            padding: 10px;
+            font-size: 16px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        button {
+            cursor: pointer;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            transition: background-color 0.3s ease;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        .error {
+            color: red;
+            margin: 10px 0;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        table, th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+        }
+        th {
+            background-color: #f2f2f2;
+            text-align: left;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>Net Worth Calculator</h1>
+
+    <!-- Net worth summary moved to the top -->
+    <h2>Your Net Worth</h2>
+    {% if last_updated %}
+    <p id="lastUpdated" style="color: #666; font-size: 0.9em;">Prices last updated: {{ last_updated }}</p>
+    {% else %}
+    <p id="lastUpdated" style="color: #666; font-size: 0.9em; display:none;"></p>
+    {% endif %}
+
+    <h3>Grand Total Net Worth:</h3>
+    <p id="grandTotal">{{ grand_total_worth | round(2) }} {{ currency }}</p>
+
+    <button type="button" id="refreshButton" style="margin-bottom:12px;">Refresh Prices</button>
+
+    <form method="POST" id="netWorthForm">
+        <label for="stocks">Stocks (one per line — e.g., AMZN, 100):</label>
+        <textarea name="stocks" id="stocks" rows="4" placeholder="Add stocks..."></textarea>
+
+        <label for="cryptos">Cryptocurrencies (one per line — e.g., BTC, 0.5):</label>
+        <textarea name="cryptos" id="cryptos" rows="4" placeholder="Add cryptocurrencies..."></textarea>
+
+        <label for="savings_loans">Savings and Loans (one per line — e.g., ING Bank, 50000, EUR):</label>
+        <textarea name="savings_loans" id="savings_loans" rows="4" placeholder="Add savings and loans..."></textarea>
+
+        <label for="currency">Select Currency:</label>
+        <select name="currency" id="currency">
+            <option value="USD">USD</option>
+            <option value="INR">INR</option>
+            <option value="EUR">EUR</option>
+            <option value="TRY">TRY</option>
+        </select>
+
+        <button type="submit">Add to Portfolio</button>
+        <button type="button" onclick="clearPortfolio()" style="background-color: #ff4444;">Clear Portfolio</button>
+    </form>
+
+    <script>
+        function clearPortfolio() {
+            if (confirm('Are you sure you want to clear your entire portfolio?')) {
+                window.location.href = '{{ request.path }}?clear=true';
+            }
+        }
+
+        // Refresh button triggers a manual refresh of prices
+        document.addEventListener('DOMContentLoaded', function () {
+            const btn = document.getElementById('refreshButton');
+            if (btn) btn.addEventListener('click', async () => {
+                btn.disabled = true;
+                btn.textContent = 'Refreshing...';
+                try {
+                    const res = await fetch('/api/portfolio/refresh', {method: 'POST'});
+                    if (!res.ok) throw new Error('Refresh failed');
+                    await fetchPortfolioAndUpdate();
+                } catch (err) {
+                    alert('Could not refresh: ' + err);
+                } finally {
+                    btn.disabled = false;
+                    btn.textContent = 'Refresh Prices';
+                }
+            });
+        });
+    </script>
+
+    <!-- Edit modal: single dialog to edit any entry -->
+    <div id="editModal" style="display:none; position: fixed; left: 0; top: 0; width:100%; height:100%; background: rgba(0,0,0,0.5);">
+        <div style="background:#fff; max-width:480px; margin:80px auto; padding:20px; border-radius:8px; position:relative;">
+            <h3>Edit Entry</h3>
+            <input type="hidden" id="editCategory">
+            <input type="hidden" id="editIndex">
+
+            <div id="rowSymbol">
+                <label>Symbol</label>
+                <input type="text" id="editSymbol" />
+            </div>
+            <div id="rowQuantity">
+                <label>Quantity</label>
+                <input type="text" id="editQuantity" />
+            </div>
+            <div id="rowName">
+                <label>Name</label>
+                <input type="text" id="editName" />
+            </div>
+            <div id="rowValue">
+                <label>Value</label>
+                <input type="text" id="editValue" />
+            </div>
+            <div id="rowCurrency">
+                <label>Currency</label>
+                <input type="text" id="editCurrency" />
+            </div>
+
+            <div style="margin-top:12px; text-align:right;">
+                <button type="button" id="editCancel" style="margin-right:8px; background:#888;">Cancel</button>
+                <button type="button" id="editSave">Save</button>
+            </div>
+        </div>
+    </div>
+
+    {% if errors %}
+    <div class="error">
+        <ul>
+        {% for error in errors %}
+            <li>{{ error }}</li>
+        {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+
+    <h2>Your Net Worth</h2>
+    {% if last_updated %}
+    <p id="lastUpdated" style="color: #666; font-size: 0.9em;">Prices last updated: {{ last_updated }}</p>
+    {% else %}
+    <p id="lastUpdated" style="color: #666; font-size: 0.9em; display:none;"></p>
+    {% endif %}
+
+    <h3>Stock Portfolio:</h3>
+    <table id="stocksTable">
+        <tr>
+            <th>Symbol</th>
+            <th>Quantity</th>
+            <th>Currency</th>
+            <th>Value ({{ currency }})</th>
+            <th>Actions</th>
+        </tr>
+        {% for stock in stocks %}
+        <tr>
+            <td>{{ stock[0] }}</td>
+            <td>{{ stock[1] }}</td>
+            <td>{{ stock[2] }}</td>
+            <td>{{ stock[3] | round(2) }}</td>
+            <td>
+                <button type="button" class="edit-btn" data-category="stocks" data-index="{{ loop.index0 }}">Edit</button>
+                <button type="button" class="delete-btn" data-category="stocks" data-index="{{ loop.index0 }}">Delete</button>
+            </td>
+        </tr>
+        {% endfor %}
+    </table>
+    <p id="totalStocks">Total Stocks Value: {{ total_stocks_worth | round(2) }} {{ currency }}</p>
+
+    <h3>Cryptocurrency Portfolio:</h3>
+    <table id="cryptosTable">
+        <tr>
+            <th>Symbol</th>
+            <th>Quantity</th>
+            <th>Currency</th>
+            <th>Value ({{ currency }})</th>
+            <th>Actions</th>
+        </tr>
+        {% for crypto in cryptos %}
+        <tr>
+            <td>{{ crypto[0] }}</td>
+            <td>{{ crypto[1] }}</td>
+            <td>{{ crypto[2] }}</td>
+            <td>{{ crypto[3] | round(2) }}</td>
+            <td>
+                <button type="button" class="edit-btn" data-category="cryptos" data-index="{{ loop.index0 }}">Edit</button>
+                <button type="button" class="delete-btn" data-category="cryptos" data-index="{{ loop.index0 }}">Delete</button>
+            </td>
+        </tr>
+        {% endfor %}
+    </table>
+    <p id="totalCryptos">Total Cryptos Value: {{ total_crypto_worth | round(2) }} {{ currency }}</p>
+
+    <h3>Savings and Loans:</h3>
+    <table id="savingsTable">
+        <tr>
+            <th>Name</th>
+            <th>Value</th>
+            <th>Currency</th>
+            <th>Value ({{ currency }})</th>
+            <th>Actions</th>
+        </tr>
+        {% for sl in savings_loans %}
+        <tr>
+            <td>{{ sl[0] }}</td>
+            <td>{{ sl[1] }}</td>
+            <td>{{ sl[2] }}</td>
+            <td>{{ sl[3] | round(2) }}</td>
+            <td>
+                <button type="button" class="edit-btn" data-category="savings_loans" data-index="{{ loop.index0 }}">Edit</button>
+                <button type="button" class="delete-btn" data-category="savings_loans" data-index="{{ loop.index0 }}">Delete</button>
+            </td>
+        </tr>
+        {% endfor %}
+    </table>
+    <p id="totalSavings">Total Savings and Loans Value: {{ total_savings_and_loans | round(2) }} {{ currency }}</p>
+
+    <h3>Grand Total Net Worth:</h3>
+    <p id="grandTotal">{{ grand_total_worth | round(2) }} {{ currency }}</p>
+
+    <script>
+        // Poll the server for updated portfolio data and update the page without reloading
+        async function fetchPortfolioAndUpdate() {
+            try {
+                const res = await fetch('/api/portfolio');
+                if (!res.ok) return;
+                const data = await res.json();
+
+                // Update last updated
+                if (data.last_updated) {
+                    const el = document.getElementById('lastUpdated');
+                    el.style.display = 'block';
+                    el.textContent = 'Prices last updated: ' + data.last_updated;
+                }
+
+                // Helper to replace table body
+                function renderTable(tableId, rows, category) {
+                    const table = document.getElementById(tableId);
+                    if (!table) return;
+                    // Keep header row, remove others
+                    while (table.rows.length > 1) table.deleteRow(1);
+                    rows.forEach((r, idx) => {
+                        const tr = table.insertRow();
+                        r.forEach(cell => {
+                            const td = tr.insertCell();
+                            td.textContent = (typeof cell === 'number') ? Number(cell).toFixed(2) : cell;
+                        });
+                        // actions cell
+                        const actionCell = tr.insertCell();
+                        const editBtn = document.createElement('button');
+                        editBtn.type = 'button';
+                        editBtn.textContent = 'Edit';
+                        editBtn.onclick = () => editEntry(category, idx);
+                        const delBtn = document.createElement('button');
+                        delBtn.type = 'button';
+                        delBtn.textContent = 'Delete';
+                        delBtn.onclick = () => deleteEntry(category, idx);
+                        actionCell.appendChild(editBtn);
+                        actionCell.appendChild(document.createTextNode(' '));
+                        actionCell.appendChild(delBtn);
+                    });
+                }
+                renderTable('stocksTable', data.stocks || [], 'stocks');
+                renderTable('cryptosTable', data.cryptos || [], 'cryptos');
+                // savings_loans rows: [name, value, currency, convertedValue]
+                renderTable('savingsTable', data.savings_loans || [], 'savings_loans');
+
+                // Totals
+                document.getElementById('totalStocks').textContent = 'Total Stocks Value: ' + (data.totals.stocks || 0).toFixed(2) + ' ' + data.currency;
+                document.getElementById('totalCryptos').textContent = 'Total Cryptos Value: ' + (data.totals.cryptos || 0).toFixed(2) + ' ' + data.currency;
+                document.getElementById('totalSavings').textContent = 'Total Savings and Loans Value: ' + (data.totals.savings_loans || 0).toFixed(2) + ' ' + data.currency;
+                document.getElementById('grandTotal').textContent = (data.totals.grand_total || 0).toFixed(2) + ' ' + data.currency;
+            } catch (err) {
+                console.debug('Could not fetch portfolio', err);
+            }
+        }
+
+        async function deleteEntry(category, index) {
+            if (!confirm('Delete this entry?')) return;
+            try {
+                const res = await fetch('/api/portfolio/delete', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({category, index})
+                });
+                if (!res.ok) throw new Error('Delete failed');
+                await fetchPortfolioAndUpdate();
+            } catch (err) {
+                alert('Could not delete entry: ' + err);
+            }
+        }
+
+        // Edit modal logic: show a single form with prefilled values so user can edit any fields
+        function showEditModal(category, index, defaults) {
+            const modal = document.getElementById('editModal');
+            document.getElementById('editCategory').value = category;
+            document.getElementById('editIndex').value = index;
+            // fields
+            document.getElementById('editSymbol').value = defaults.symbol || '';
+            document.getElementById('editQuantity').value = defaults.quantity || '';
+            document.getElementById('editName').value = defaults.name || '';
+            document.getElementById('editValue').value = defaults.value || '';
+            document.getElementById('editCurrency').value = (defaults.currency || '').toUpperCase();
+
+            // show/hide fields based on category
+            if (category === 'stocks' || category === 'cryptos') {
+                document.getElementById('rowSymbol').style.display = '';
+                document.getElementById('rowQuantity').style.display = '';
+                document.getElementById('rowName').style.display = 'none';
+                document.getElementById('rowValue').style.display = 'none';
+                document.getElementById('rowCurrency').style.display = 'none';
+            } else {
+                document.getElementById('rowSymbol').style.display = 'none';
+                document.getElementById('rowQuantity').style.display = 'none';
+                document.getElementById('rowName').style.display = '';
+                document.getElementById('rowValue').style.display = '';
+                document.getElementById('rowCurrency').style.display = '';
+            }
+
+            modal.style.display = 'block';
+        }
+
+        async function editEntry(category, index) {
+            // read existing row values to prefill modal
+            const tableIdMap = {'stocks': 'stocksTable', 'cryptos': 'cryptosTable', 'savings_loans': 'savingsTable'};
+            const table = document.getElementById(tableIdMap[category]);
+            let defaults = {};
+            if (table && table.rows.length > index + 1) {
+                const row = table.rows[index + 1];
+                if (category === 'stocks' || category === 'cryptos') {
+                    defaults.symbol = row.cells[0].textContent.trim();
+                    defaults.quantity = row.cells[1].textContent.trim();
+                    defaults.currency = (row.cells[2].textContent || '').trim();
+                } else {
+                    defaults.name = row.cells[0].textContent.trim();
+                    defaults.value = row.cells[1].textContent.trim();
+                    defaults.currency = (row.cells[2].textContent || '').trim();
+                }
+            }
+            showEditModal(category, index, defaults);
+        }
+
+        // Modal save handler
+        document.addEventListener('DOMContentLoaded', function () {
+            const modal = document.getElementById('editModal');
+            const saveBtn = document.getElementById('editSave');
+            const cancelBtn = document.getElementById('editCancel');
+            saveBtn.addEventListener('click', async () => {
+                const category = document.getElementById('editCategory').value;
+                const index = parseInt(document.getElementById('editIndex').value, 10);
+                try {
+                    if (category === 'stocks' || category === 'cryptos') {
+                        const symbol = document.getElementById('editSymbol').value.trim();
+                        const quantity = document.getElementById('editQuantity').value.trim();
+                        const payload = {category, index, symbol, quantity};
+                        const res = await fetch('/api/portfolio/update_entry', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)});
+                        if (!res.ok) throw new Error('Update failed');
+                    } else {
+                        const name = document.getElementById('editName').value.trim();
+                        const value = document.getElementById('editValue').value.trim();
+                        const curr = document.getElementById('editCurrency').value.trim().toUpperCase();
+                        const payload = {category, index, name, value, currency: curr};
+                        const res = await fetch('/api/portfolio/update_entry', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)});
+                        if (!res.ok) throw new Error('Update failed');
+                    }
+                    modal.style.display = 'none';
+                    await fetchPortfolioAndUpdate();
+                } catch (err) {
+                    alert('Could not update entry: ' + err);
+                }
+            });
+            cancelBtn.addEventListener('click', () => { modal.style.display = 'none'; });
+        });
+
+        // Start polling every 30 seconds, and once immediately
+        fetchPortfolioAndUpdate();
+        setInterval(fetchPortfolioAndUpdate, 30000);
+    </script>
+
+</div>
+</body>
+</html>
+{% endblock %}
