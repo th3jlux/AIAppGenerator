@@ -135,7 +135,10 @@
             max-height: 2000px;
         }
         .collapsible-section.collapsed {
-            max-height: 0;
+            max-height: 0 !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            border-width: 0 !important;
         }
         #addformSection {
             background: #fff;
@@ -186,13 +189,13 @@
         </div>
     </div>
 
-    <div class="section-header" data-section="addform">
+    <div class="section-header collapsed" data-section="addform">
         <h3>
             <span class="toggle-icon">▼</span>
             Add to Portfolio
         </h3>
     </div>
-    <div class="collapsible-section" id="addformSection">
+    <div class="collapsible-section collapsed" id="addformSection">
         <form method="POST" id="netWorthForm">
             <label for="stocks">Stocks (one per line — e.g., AMZN, 100):</label>
             <textarea name="stocks" id="stocks" rows="4" placeholder="Add stocks..."></textarea>
@@ -282,13 +285,13 @@
     </div>
     {% endif %}
 
-    <div class="section-header" data-section="stocks">
+    <div class="section-header collapsed" data-section="stocks">
         <h3>
             <span class="toggle-icon">▼</span>
             Stock Portfolio: <span id="totalStocks">{{ total_stocks_worth | round(2) }} {{ currency }}</span>
         </h3>
     </div>
-    <div class="collapsible-section" id="stocksSection">
+    <div class="collapsible-section collapsed" id="stocksSection">
         <table id="stocksTable">
             <tr>
                 <th>Symbol</th>
@@ -312,13 +315,13 @@
         </table>
     </div>
 
-    <div class="section-header" data-section="cryptos">
+    <div class="section-header collapsed" data-section="cryptos">
         <h3>
             <span class="toggle-icon">▼</span>
             Cryptocurrency Portfolio: <span id="totalCryptos">{{ total_crypto_worth | round(2) }} {{ currency }}</span>
         </h3>
     </div>
-    <div class="collapsible-section" id="cryptosSection">
+    <div class="collapsible-section collapsed" id="cryptosSection">
         <table id="cryptosTable">
             <tr>
                 <th>Symbol</th>
@@ -342,13 +345,13 @@
         </table>
     </div>
 
-    <div class="section-header" data-section="savings">
+    <div class="section-header collapsed" data-section="savings">
         <h3>
             <span class="toggle-icon">▼</span>
             Savings and Loans: <span id="totalSavings">{{ total_savings_and_loans | round(2) }} {{ currency }}</span>
         </h3>
     </div>
-    <div class="collapsible-section" id="savingsSection">
+    <div class="collapsible-section collapsed" id="savingsSection">
         <table id="savingsTable">
             <tr>
                 <th>Name</th>
