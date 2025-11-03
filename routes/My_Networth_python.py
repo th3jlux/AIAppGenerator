@@ -193,7 +193,16 @@ def api_portfolio():
 
     total_stocks_worth = sum(item[3] for item in stocks_out) if stocks_out else 0
     total_crypto_worth = sum(item[3] for item in cryptos_out) if cryptos_out else 0
-    total_savings_and_loans = sum(item[3] for item in savings_out) if savings_out else 0
+    # For savings, totals should sum the values shown in the Value (display_currency) column.
+    # If the original currency equals the display currency, use the original entered amount; otherwise use the converted value.
+    total_savings_and_loans = 0
+    for sl in savings_loans:
+        orig_val = sl[1]
+        orig_curr = sl[2]
+        if orig_curr == display_currency:
+            total_savings_and_loans += orig_val
+        else:
+            total_savings_and_loans += usd_to_target(sl[3], display_currency)
     grand_total_worth = total_stocks_worth + total_crypto_worth + total_savings_and_loans
 
     # Format last_updated for display (drop seconds)
@@ -469,10 +478,41 @@ def calculate_net_worth():
                            total_crypto_worth=0, total_savings_and_loans=0,
                            grand_total_worth=0, currency="USD")
 
-    # Calculate totals for display
-    total_stocks_worth = sum(stock[3] for stock in stocks)
-    total_crypto_worth = sum(crypto[3] for crypto in cryptos)
-    total_savings_and_loans = sum(sl[3] for sl in savings_loans)
+    # Calculate totals for display and prepare per-row converted values so template matches API behavior
+    try:
+        resp = requests.get(CURRENCY_API_URL)
+        rates = resp.json().get('rates', {})
+    except Exception:
+        rates = currency_conversion or {}
+
+    def usd_to_target(value_usd, target):
+        if value_usd is None:
+            return 0
+        if not rates or target not in rates:
+            return value_usd
+        return value_usd * rates.get(target, 1)
+
+    # Build display rows: stocks/cryptos converted to display currency
+    stocks_display = [[s[0], s[1], s[2], round(usd_to_target(s[3], target_currency), 6)] for s in stocks]
+    cryptos_display = [[c[0], c[1], c[2], round(usd_to_target(c[3], target_currency), 6)] for c in cryptos]
+
+    # For savings, keep original value and provide converted value for display
+    savings_display = []
+    for sl in savings_loans:
+        converted = round(usd_to_target(sl[3], target_currency), 6)
+        savings_display.append([sl[0], sl[1], sl[2], converted])
+
+    total_stocks_worth = sum(item[3] for item in stocks_display) if stocks_display else 0
+    total_crypto_worth = sum(item[3] for item in cryptos_display) if cryptos_display else 0
+    total_savings_and_loans = 0
+    for sl in savings_loans:
+        orig_val = sl[1]
+        orig_curr = sl[2]
+        if orig_curr == target_currency:
+            total_savings_and_loans += orig_val
+        else:
+            total_savings_and_loans += usd_to_target(sl[3], target_currency)
+
     grand_total_worth = total_stocks_worth + total_crypto_worth + total_savings_and_loans
 
     # Format last_updated for display (drop seconds)
@@ -486,8 +526,8 @@ def calculate_net_worth():
     else:
         last_updated_display = None
 
-    return render_template('My_Networth_html.html', errors=errors, stocks=stocks, 
-                           cryptos=cryptos, savings_loans=savings_loans, total_stocks_worth=total_stocks_worth,
+    return render_template('My_Networth_html.html', errors=errors, stocks=stocks_display, 
+                           cryptos=cryptos_display, savings_loans=savings_display, total_stocks_worth=total_stocks_worth,
                            total_crypto_worth=total_crypto_worth, 
                            total_savings_and_loans=total_savings_and_loans, grand_total_worth=grand_total_worth,
                            currency=target_currency, last_updated=last_updated_display,
