@@ -68,6 +68,29 @@ def save_portfolio(portfolio_data):
     except Exception as e:
         print(f"Error saving portfolio: {e}")
 
+def usd_to_target(value_usd, target, rates=None, debug=False):
+    """Convert a USD value to target currency using provided rates.
+    
+    Args:
+        value_usd: Value in USD to convert
+        target: Target currency code (e.g., 'EUR', 'INR')
+        rates: Dictionary of currency conversion rates from USD
+        debug: Whether to print debug info about conversions
+    
+    Returns:
+        Converted value in target currency
+    """
+    if value_usd is None:
+        return 0
+    if not rates or target not in rates:
+        if debug:
+            print(f"[Currency Rates] Warning: No conversion rate found for {target}, using 1:1 ratio")
+        return value_usd
+    rate = rates.get(target, 1)
+    if debug:
+        print(f"[Currency Rates] Converting USD to {target} with rate {rate}")
+    return value_usd * rate
+
 CURRENCY_API_URL = 'https://api.exchangerate-api.com/v4/latest/USD'
 # How long (seconds) to consider stored prices fresh before refreshing (every 24 hours)
 PRICE_TTL_SECONDS = 60*60*24
@@ -174,21 +197,13 @@ def api_portfolio():
     except Exception:
         rates = {}
 
-    def usd_to_target(value_usd, target):
-        if value_usd is None:
-            return 0
-        if not rates or target not in rates:
-            # fallback: assume 1:1
-            return value_usd
-        return value_usd * rates.get(target, 1)
-
     # Convert stored USD values to display currency for payload
-    stocks_out = [[s[0], s[1], s[2], round(usd_to_target(s[3], display_currency), 6)] for s in stocks]
-    cryptos_out = [[c[0], c[1], c[2], round(usd_to_target(c[3], display_currency), 6)] for c in cryptos]
+    stocks_out = [[s[0], s[1], s[2], round(usd_to_target(s[3], display_currency, rates), 6)] for s in stocks]
+    cryptos_out = [[c[0], c[1], c[2], round(usd_to_target(c[3], display_currency, rates), 6)] for c in cryptos]
     savings_out = []
     for sl in savings_loans:
         # savings_loans stored as [name, value_in_orig_currency, orig_currency, value_usd]
-        converted = round(usd_to_target(sl[3], display_currency), 6)
+        converted = round(usd_to_target(sl[3], display_currency, rates), 6)
         savings_out.append([sl[0], sl[1], sl[2], converted])
 
     total_stocks_worth = sum(item[3] for item in stocks_out) if stocks_out else 0
@@ -202,7 +217,7 @@ def api_portfolio():
         if orig_curr == display_currency:
             total_savings_and_loans += orig_val
         else:
-            total_savings_and_loans += usd_to_target(sl[3], display_currency)
+            total_savings_and_loans += usd_to_target(sl[3], display_currency, rates)
     grand_total_worth = total_stocks_worth + total_crypto_worth + total_savings_and_loans
 
     # Format last_updated for display (drop seconds)
@@ -485,21 +500,14 @@ def calculate_net_worth():
     except Exception:
         rates = currency_conversion or {}
 
-    def usd_to_target(value_usd, target):
-        if value_usd is None:
-            return 0
-        if not rates or target not in rates:
-            return value_usd
-        return value_usd * rates.get(target, 1)
-
     # Build display rows: stocks/cryptos converted to display currency
-    stocks_display = [[s[0], s[1], s[2], round(usd_to_target(s[3], target_currency), 6)] for s in stocks]
-    cryptos_display = [[c[0], c[1], c[2], round(usd_to_target(c[3], target_currency), 6)] for c in cryptos]
+    stocks_display = [[s[0], s[1], s[2], round(usd_to_target(s[3], target_currency, rates, debug=True), 6)] for s in stocks]
+    cryptos_display = [[c[0], c[1], c[2], round(usd_to_target(c[3], target_currency, rates, debug=True), 6)] for c in cryptos]
 
     # For savings, keep original value and provide converted value for display
     savings_display = []
     for sl in savings_loans:
-        converted = round(usd_to_target(sl[3], target_currency), 6)
+        converted = round(usd_to_target(sl[3], target_currency, rates, debug=True), 6)
         savings_display.append([sl[0], sl[1], sl[2], converted])
 
     total_stocks_worth = sum(item[3] for item in stocks_display) if stocks_display else 0
@@ -511,7 +519,7 @@ def calculate_net_worth():
         if orig_curr == target_currency:
             total_savings_and_loans += orig_val
         else:
-            total_savings_and_loans += usd_to_target(sl[3], target_currency)
+            total_savings_and_loans += usd_to_target(sl[3], target_currency, rates, debug=True)
 
     grand_total_worth = total_stocks_worth + total_crypto_worth + total_savings_and_loans
 
