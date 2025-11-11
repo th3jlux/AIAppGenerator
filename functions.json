@@ -4,5 +4,17 @@
         "href": "/My_Networth_html",
         "template": "My_Networth_html.html",
         "python_file": "My_Networth_python.py"
+    },
+    {
+        "bluePrint": "Pdf_Merge_Split_blueprint",
+        "href": "/Pdf_Merge_Split_html",
+        "template": "Pdf_Merge_Split_html.html",
+        "python_file": "Pdf_Merge_Split_python.py"
+    },
+    {
+        "bluePrint": "Deutsch_Vocab_blueprint",
+        "href": "/Deutsch_Vocab_html",
+        "template": "Deutsch_Vocab_html.html",
+        "python_file": "Deutsch_Vocab_python.py"
     }
 ]

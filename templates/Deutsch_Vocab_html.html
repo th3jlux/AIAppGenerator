@@ -1,0 +1,1879 @@
+
+{% extends "base.html" %}
+{% block content %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>German Vocabulary Learning</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f4f9;
+            color: #333;
+            display: grid;
+            grid-template-columns: 280px 1fr 280px;
+            gap: 30px;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        .main-content {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-start;
+            padding-top: 20px;
+        }
+        
+        .dashboard {
+            background-color: #fff;
+            border-radius: 16px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.12);
+            padding: 20px;
+            min-height: 500px;
+            position: sticky;
+            top: 20px;
+        }
+        
+        .right-panel {
+            background-color: #fff;
+            border-radius: 16px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.12);
+            padding: 20px;
+            min-height: 500px;
+            position: sticky;
+            top: 20px;
+        }
+        
+        .dashboard h3 {
+            margin: 0 0 20px 0;
+            color: #2c3e50;
+            font-size: 20px;
+            text-align: center;
+            border-bottom: 2px solid #e9ecef;
+            padding-bottom: 10px;
+        }
+        
+        .progress-section {
+            background: linear-gradient(135deg, #17a2b8 0%, #138496 100%);
+            color: white;
+            padding: 15px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        
+        .progress-section h4 {
+            margin: 0 0 10px 0;
+            font-size: 16px;
+        }
+        
+        .completion-progress {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin: 10px 0;
+        }
+        
+        .completion-stats {
+            font-size: 14px;
+        }
+        
+        .progress-bar-container {
+            background-color: rgba(255,255,255,0.3);
+            border-radius: 10px;
+            height: 20px;
+            margin: 10px 0;
+            overflow: hidden;
+        }
+        
+        .progress-bar-fill {
+            background: linear-gradient(90deg, #28a745, #20c997);
+            height: 100%;
+            border-radius: 10px;
+            transition: width 0.5s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        
+        .metric-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 15px;
+            border-radius: 12px;
+            margin-bottom: 15px;
+            text-align: center;
+        }
+        
+        .metric-value {
+            font-size: 24px;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        
+        .metric-label {
+            font-size: 12px;
+            opacity: 0.9;
+        }
+        
+        .accuracy-bar {
+            background-color: #e9ecef;
+            border-radius: 10px;
+            height: 20px;
+            margin: 10px 0;
+            overflow: hidden;
+        }
+        
+        .accuracy-fill {
+            background: linear-gradient(90deg, #28a745, #20c997);
+            height: 100%;
+            border-radius: 10px;
+            transition: width 0.5s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        
+        .recent-words {
+            margin-top: 20px;
+        }
+        
+        .recent-words h4 {
+            margin: 0 0 15px 0;
+            color: #2c3e50;
+            font-size: 16px;
+        }
+        
+        .word-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 12px;
+            margin-bottom: 8px;
+            border-radius: 8px;
+            font-size: 14px;
+        }
+        
+        .word-correct {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        
+        .word-incorrect {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+        
+        .word-retry {
+            background-color: #fff3cd;
+            color: #856404;
+        }
+        
+        .streak-badge {
+            background: linear-gradient(135deg, #ffd700, #ffa500);
+            color: #333;
+            padding: 8px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: bold;
+            text-align: center;
+            margin: 10px 0;
+        }
+        
+        .reset-btn {
+            background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 12px;
+            margin-top: 10px;
+            transition: all 0.2s ease;
+        }
+        
+        .audio-controls {
+            background: linear-gradient(135deg, #6f42c1 0%, #5a2d91 100%);
+            border-radius: 10px;
+            padding: 12px;
+            margin: 12px 0;
+            color: white;
+            text-align: center;
+        }
+        
+        .mode-toggle {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            margin-bottom: 8px;
+            font-size: 13px;
+        }
+        
+        .toggle-switch {
+            position: relative;
+            width: 50px;
+            height: 25px;
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .toggle-switch.active {
+            background: rgba(255, 255, 255, 0.6);
+        }
+        
+        .toggle-slider {
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            width: 21px;
+            height: 21px;
+            background: white;
+            border-radius: 50%;
+            transition: all 0.3s ease;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        
+        .toggle-switch.active .toggle-slider {
+            transform: translateX(25px);
+        }
+        
+        .audio-btn {
+            background: rgba(255, 255, 255, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            margin: 5px;
+            transition: all 0.2s ease;
+        }
+        
+        .audio-btn:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+        
+        .audio-btn.recording {
+            background: #dc3545;
+            border-color: #dc3545;
+            animation: pulse 1.5s infinite;
+        }
+        
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.7; }
+            100% { opacity: 1; }
+        }
+        
+        .listening-indicator {
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+            color: white;
+            border: none;
+            width: 65px;
+            height: 65px;
+            border-radius: 50%;
+            font-size: 28px;
+            margin: 5px auto;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(40, 167, 69, 0.25);
+        }
+        
+        .listening-indicator.listening {
+            background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+            animation: pulse 1.5s infinite;
+            box-shadow: 0 4px 15px rgba(220, 53, 69, 0.35);
+        }
+        
+        .listening-indicator.waiting {
+            background: linear-gradient(135deg, #ffc107 0%, #fd7e14 100%);
+            box-shadow: 0 4px 15px rgba(255, 193, 7, 0.35);
+        }
+        
+        .audio-input-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 12px;
+            width: 100%;
+            margin: 15px 0;
+            padding: 15px;
+            background: linear-gradient(135deg, rgba(40, 167, 69, 0.08) 0%, rgba(32, 201, 151, 0.08) 100%);
+            border-radius: 12px;
+            border: 1px solid rgba(40, 167, 69, 0.2);
+            transition: all 0.3s ease;
+        }
+        
+        .audio-input-container:hover {
+            background: linear-gradient(135deg, rgba(40, 167, 69, 0.12) 0%, rgba(32, 201, 151, 0.12) 100%);
+            border-color: rgba(40, 167, 69, 0.3);
+        }
+        
+        .audio-status-text {
+            font-size: 13px;
+            color: #28a745;
+            text-align: center;
+            font-weight: 500;
+            margin-top: 5px;
+        }        .completion-screen {
+            text-align: center;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 16px;
+            padding: 40px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.15);
+        }
+        
+        .completion-screen h2 {
+            margin: 0 0 20px 0;
+            font-size: 28px;
+            font-weight: bold;
+        }
+        
+        .completion-stats {
+            background: rgba(255,255,255,0.1);
+            border-radius: 12px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        
+        .completion-actions {
+            margin-top: 30px;
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+        }
+        
+        .completion-btn {
+            background: rgba(255,255,255,0.2);
+            color: white;
+            border: 2px solid rgba(255,255,255,0.3);
+            padding: 12px 24px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            display: inline-block;
+        }
+        
+        .completion-btn:hover {
+            background: rgba(255,255,255,0.3);
+            border-color: rgba(255,255,255,0.5);
+            transform: translateY(-2px);
+        }
+        
+        #level-selector {
+            margin-bottom: 20px;
+        }
+        
+        select {
+            padding: 8px 12px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 16px;
+            background-color: white;
+        }
+        
+        .card-container {
+            perspective: 1000px;
+            width: 400px;
+            min-height: 320px;
+        }
+        
+        .card {
+            background-color: #fff;
+            border-radius: 16px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.12);
+            width: 100%;
+            max-width: 500px;
+            min-height: 350px;
+            padding: 30px;
+            text-align: center;
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            box-sizing: border-box;
+            transition: transform 0.6s ease-in-out, opacity 0.3s ease-in-out;
+            margin: 0 auto;
+        }
+        
+        .card.flipped {
+            transform: scale(0.95) rotateX(10deg);
+            opacity: 0.8;
+        }
+        
+        .card h3 {
+            margin: 0 0 25px 0;
+            font-size: 22px;
+            color: #2c3e50;
+            font-weight: 600;
+        }
+        
+        .form-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            gap: 20px;
+        }
+        
+        .card input[type="text"] {
+            width: 100%;
+            padding: 14px 16px;
+            border: 2px solid #e9ecef;
+            border-radius: 10px;
+            font-size: 16px;
+            transition: border-color 0.3s, box-shadow 0.3s;
+            box-sizing: border-box;
+        }
+        
+        .card input[type="text"]:focus {
+            outline: none;
+            border-color: #28a745;
+            box-shadow: 0 0 0 3px rgba(40, 167, 69, 0.1);
+        }
+        
+        .umlaut-buttons {
+            display: flex;
+            justify-content: center;
+            gap: 6px;
+            margin: 15px 0;
+            flex-wrap: wrap;
+        }
+        
+        .umlaut-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 10px 14px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+            transition: all 0.2s ease;
+            min-width: 44px;
+            height: 44px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+        }
+        
+        .umlaut-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+        
+        .umlaut-btn:active {
+            transform: translateY(0);
+            box-shadow: 0 2px 4px rgba(102, 126, 234, 0.3);
+        }
+        
+        .submit-section {
+            margin-top: 10px;
+        }
+        
+        .card button[type="submit"] {
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+            color: #fff;
+            border: none;
+            padding: 14px 32px;
+            border-radius: 10px;
+            cursor: pointer;
+            font-size: 18px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            width: 100%;
+            box-shadow: 0 4px 15px rgba(40, 167, 69, 0.3);
+        }
+        
+        .card button[type="submit"]:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 6px 20px rgba(40, 167, 69, 0.4);
+        }
+        
+        .card button[type="submit"]:active {
+            transform: translateY(0);
+        }
+        
+        .retry-mode {
+            background: linear-gradient(135deg, #fff3cd 0%, #fef9e7 100%);
+            border: 2px solid #ffd60a;
+        }
+        
+        .retry-mode h3 {
+            color: #856404;
+        }
+        
+        .message {
+            margin-top: 15px;
+            padding: 12px 16px;
+            border-radius: 8px;
+            font-weight: 500;
+            min-height: 20px;
+            transition: all 0.3s ease;
+        }
+        
+        .message.success {
+            background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%);
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .message.error {
+            background: linear-gradient(135deg, #f8d7da 0%, #f1aeb5 100%);
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .message.correction_submitted {
+            background: linear-gradient(135deg, #d1ecf1 0%, #bee5eb 100%);
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+        
+        .csv-update-status {
+            margin-top: 10px;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+        
+        .csv-success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .csv-warning {
+            background-color: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+        }
+        
+        .correction-interface {
+            margin-top: 15px;
+            padding: 20px;
+            background-color: #f8f9fa;
+            border-radius: 12px;
+            border: 2px dashed #dee2e6;
+        }
+        
+        .correction-interface h4 {
+            margin: 0 0 15px 0;
+            color: #495057;
+            font-size: 16px;
+            text-align: center;
+        }
+        
+        .correction-fields {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 12px;
+            margin-bottom: 15px;
+        }
+        
+        .correction-field {
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .correction-field label {
+            font-size: 12px;
+            font-weight: 600;
+            color: #495057;
+            margin-bottom: 4px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .correction-input {
+            width: 100%;
+            padding: 10px 12px;
+            border: 2px solid #ced4da;
+            border-radius: 6px;
+            font-size: 14px;
+            box-sizing: border-box;
+            transition: border-color 0.3s ease;
+        }
+        
+        .correction-input:focus {
+            outline: none;
+            border-color: #ffc107;
+            box-shadow: 0 0 0 3px rgba(255, 193, 7, 0.1);
+        }
+        
+        .current-values {
+            background-color: #fff;
+            padding: 12px;
+            border-radius: 8px;
+            border: 1px solid #e9ecef;
+            margin-bottom: 15px;
+        }
+        
+        .current-values h5 {
+            margin: 0 0 8px 0;
+            font-size: 12px;
+            color: #6c757d;
+            text-transform: uppercase;
+            font-weight: 600;
+        }
+        
+        .current-value {
+            font-size: 14px;
+            color: #495057;
+            margin-bottom: 4px;
+        }
+        
+        .correction-buttons {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        
+        .correction-btn {
+            flex: 1;
+            padding: 10px 16px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .accept-btn {
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+            color: white;
+            box-shadow: 0 2px 8px rgba(40, 167, 69, 0.3);
+        }
+        
+        .accept-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(40, 167, 69, 0.4);
+        }
+        
+        .suggest-btn {
+            background: linear-gradient(135deg, #ffc107 0%, #fd7e14 100%);
+            color: #212529;
+            box-shadow: 0 2px 8px rgba(255, 193, 7, 0.3);
+        }
+        
+        .suggest-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(255, 193, 7, 0.4);
+        }
+        
+        .card button {
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+            color: #fff;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            transition: all 0.3s ease;
+        }
+        
+        .card button:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 6px 20px rgba(40, 167, 69, 0.4);
+        }
+        
+        .card button:active {
+            transform: translateY(0);
+        }
+        
+        .message {
+            margin-top: 15px;
+            padding: 10px;
+            border-radius: 4px;
+            font-weight: bold;
+            min-height: 20px;
+        }
+        
+        .message.success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .message.error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+    </style>
+</head>
+    {% if completed %}
+    <div class="main-content">
+        <div class="completion-screen">
+            <h2>🎉 Congratulations!</h2>
+            <p style="font-size: 18px; margin-bottom: 25px;">You've successfully completed all words in <strong>{{ level }}</strong>!</p>
+            
+            <div class="completion-stats">
+                <h3 style="margin: 0 0 15px 0;">📊 Level Stats</h3>
+                <p style="margin: 5px 0; font-size: 16px;"><strong>Total Words:</strong> {{ total_words }}</p>
+                <p style="margin: 5px 0; font-size: 16px;"><strong>Level:</strong> {{ level }}</p>
+                <p style="margin: 5px 0; font-size: 14px; opacity: 0.9;">All words have been practiced and mastered!</p>
+            </div>
+            
+            <div class="completion-actions">
+                <a href="?level={{ level }}" class="completion-btn" onclick="resetLevelProgress()">
+                    🔄 Practice Again
+                </a>
+                <select id="next-level-select" class="completion-btn" style="background: rgba(255,255,255,0.3);" onchange="goToLevel(this.value)">
+                    <option value="">Choose Next Level</option>
+                    {% for option in level_options %}
+                        {% if option != level %}
+                            <option value="{{ option }}">{{ option }}</option>
+                        {% endif %}
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        function resetLevelProgress() {
+            // Clear completion tracking for this level
+
+            const currentLevel = document.getElementById('current-level').textContent;
+            
+            // Call backend to reset server-side progress
+            fetch(`/vocab/${currentLevel}/reset`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    // Clear localStorage completion data for this level
+                    localStorage.removeItem('completed_' + currentLevel);
+                    // Reload page to reset the session
+                    window.location.reload();
+                } else {
+                    console.error('Error resetting level progress:', data.message);
+                    alert('Error resetting progress: ' + data.message);
+                }
+            })
+            .catch(error => {
+                console.error('Error resetting level progress:', error);
+                alert('Error resetting progress. Please try again.');
+            });
+        }
+        
+        function goToLevel(newLevel) {
+            if (newLevel) {
+                window.location.href = '?level=' + encodeURIComponent(newLevel);
+            }
+        }
+    </script>
+    
+    {% elif error %}
+    <div class="main-content">
+        <div class="card-container">
+            <div class="card" style="background-color: #f8d7da; color: #721c24;">
+                <h3>⚠️ Error</h3>
+                <p>{{ error }}</p>
+                <a href="?level=A1.1" style="color: #721c24;">← Back to A1.1</a>
+            </div>
+        </div>
+    </div>
+    
+    {% else %}
+    <div class="main-content">
+        <div id="level-selector">
+            <label for="level-select">Choose Level: </label>
+            <select id="level-select">
+                {% for option in level_options %}
+                    <option value="{{ option }}" {% if option == level %}selected{% endif %}>{{ option }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        
+        <div class="card-container">
+            <div class="card" id="vocab-card">
+                <form id="vocab-form">
+                    <div class="form-content">
+                        <h3 id="question-text">Translate: <span id="english-word">{{ english_word }}</span></h3>
+                        
+                        <input type="hidden" name="correct_deutsch" value="{{ correct_deutsch }}">
+                        <input type="hidden" name="artikel" value="{{ artikel }}">
+                        <input type="hidden" name="level" value="{{ level }}">
+                        <input type="hidden" name="is_retry" value="false" id="retry-flag">
+                        <input type="hidden" name="is_correction" value="false" id="correction-flag">
+                        <input type="hidden" name="english_word" value="{{ english_word }}">
+                        
+                        <input type="text" name="user_input" id="user-input" placeholder="Type the German translation..." autocomplete="off" autofocus>
+                        
+                        <div class="umlaut-buttons">
+                            <button type="button" class="umlaut-btn" onclick="insertUmlaut('ä')" title="Insert ä">ä</button>
+                            <button type="button" class="umlaut-btn" onclick="insertUmlaut('ö')" title="Insert ö">ö</button>
+                            <button type="button" class="umlaut-btn" onclick="insertUmlaut('ü')" title="Insert ü">ü</button>
+                            <button type="button" class="umlaut-btn" onclick="insertUmlaut('Ä')" title="Insert Ä">Ä</button>
+                            <button type="button" class="umlaut-btn" onclick="insertUmlaut('Ö')" title="Insert Ö">Ö</button>
+                            <button type="button" class="umlaut-btn" onclick="insertUmlaut('Ü')" title="Insert Ü">Ü</button>
+                            <button type="button" class="umlaut-btn" onclick="insertUmlaut('ß')" title="Insert ß">ß</button>
+                        </div>
+                    </div>
+                    
+                    <div class="submit-section">
+                        <button type="submit">Submit</button>
+                        <div class="message" id="response-message"></div>
+                        <div class="correction-interface" id="correction-interface" style="display: none;">
+                            <h4>�️ Edit Vocabulary Entry</h4>
+                            
+                            <div class="current-values">
+                                <h5>Current Database Values:</h5>
+                                <div class="current-value"><strong>English:</strong> <span id="current-english"></span></div>
+                                <div class="current-value"><strong>German:</strong> <span id="current-german"></span></div>
+                                <div class="current-value"><strong>Artikel:</strong> <span id="current-artikel"></span></div>
+                            </div>
+                            
+                            <div class="correction-fields">
+                                <div class="correction-field">
+                                    <label for="correction-english">English Translation</label>
+                                    <input type="text" class="correction-input" id="correction-english" 
+                                           placeholder="Enter the English meaning...">
+                                </div>
+                                
+                                <div class="correction-field">
+                                    <label for="correction-german">German Word</label>
+                                    <input type="text" class="correction-input" id="correction-german" 
+                                           placeholder="Enter the German word...">
+                                </div>
+                                
+                                <div class="correction-field">
+                                    <label for="correction-artikel">Artikel (der/die/das)</label>
+                                    <select class="correction-input" id="correction-artikel">
+                                        <option value="">Select artikel...</option>
+                                        <option value="der">der (masculine)</option>
+                                        <option value="die">die (feminine)</option>
+                                        <option value="das">das (neuter)</option>
+                                        <option value="">No artikel</option>
+                                    </select>
+                                </div>
+                            </div>
+                            
+                            <div class="correction-buttons">
+                                <button type="button" class="correction-btn accept-btn" onclick="acceptDatabaseAnswer()">
+                                    Keep Original
+                                </button>
+                                <button type="button" class="correction-btn suggest-btn" onclick="submitFullCorrection()">
+                                    Submit Changes
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="dashboard">
+        <h3>📊 Progress Tracking</h3>
+        
+        <div class="progress-section">
+            <h4>🎯 Level Progress</h4>
+            <div class="completion-stats">
+                <span id="completed-count">0</span> / <span id="total-count">0</span> words completed
+            </div>
+            <div class="progress-bar-container">
+                <div class="progress-bar-fill" id="level-progress-bar" style="width: 0%">0%</div>
+            </div>
+            <div style="font-size: 12px; opacity: 0.9;">
+                Current Level: <strong id="current-level">{{ level }}</strong>
+            </div>
+        </div>
+        
+        <div class="metric-card">
+            <div class="metric-value" id="total-words">0</div>
+            <div class="metric-label">WORDS PRACTICED</div>
+        </div>
+        
+        <div class="metric-card">
+            <div class="metric-value" id="accuracy-percent">0%</div>
+            <div class="metric-label">ACCURACY</div>
+        </div>
+        
+        <div class="accuracy-bar">
+            <div class="accuracy-fill" id="accuracy-bar" style="width: 0%">0%</div>
+        </div>
+        
+        <div class="streak-badge" id="streak-badge">
+            🔥 Current Streak: <span id="current-streak">0</span>
+        </div>
+    </div>
+    
+    <div class="main-content">
+        {% if english_word %}
+        <div class="card-container">
+            <div class="card" id="vocab-card">
+                <h3 id="question-text">What is <strong>{{ english_word }}</strong> in German?</h3>
+                
+                <div class="form-content">
+                    <form method="POST" id="vocab-form">
+                        <input type="hidden" name="correct_deutsch" value="{{ correct_deutsch }}">
+                        <input type="hidden" name="artikel" value="{{ artikel }}">
+                        <input type="hidden" name="level" value="{{ level }}">
+                        <input type="hidden" name="is_retry" value="false" id="retry-flag">
+                        <input type="hidden" name="is_correction" value="false" id="correction-flag">
+                        <input type="hidden" name="english_word" value="{{ english_word }}">
+                        
+                        <input type="text" name="user_input" id="user-input" placeholder="Type the German translation..." autocomplete="off" autofocus>
+                        
+                        <div class="umlaut-buttons">
+                            <button type="button" class="umlaut-btn" onclick="insertUmlaut('ä')" title="Insert ä">ä</button>
+                            <button type="button" class="umlaut-btn" onclick="insertUmlaut('ö')" title="Insert ö">ö</button>
+                            <button type="button" class="umlaut-btn" onclick="insertUmlaut('ü')" title="Insert ü">ü</button>
+                            <button type="button" class="umlaut-btn" onclick="insertUmlaut('Ä')" title="Insert Ä">Ä</button>
+                            <button type="button" class="umlaut-btn" onclick="insertUmlaut('Ö')" title="Insert Ö">Ö</button>
+                            <button type="button" class="umlaut-btn" onclick="insertUmlaut('Ü')" title="Insert Ü">Ü</button>
+                            <button type="button" class="umlaut-btn" onclick="insertUmlaut('ß')" title="Insert ß">ß</button>
+                        </div>
+                    </div>
+                    
+                    <div class="submit-section">
+                        <button type="submit">Submit</button>
+                        <div class="message" id="response-message"></div>
+                        <div class="correction-interface" id="correction-interface" style="display: none;">
+                            <h4>✏️ Edit Vocabulary Entry</h4>
+                            
+                            <div class="current-values">
+                                <h5>Current Database Values:</h5>
+                                <div class="current-value"><strong>English:</strong> <span id="current-english"></span></div>
+                                <div class="current-value"><strong>German:</strong> <span id="current-german"></span></div>
+                                <div class="current-value"><strong>Article:</strong> <span id="current-artikel"></span></div>
+                            </div>
+                            
+                            <div class="correction-fields">
+                                <div class="correction-field">
+                                    <label for="correction-english">English Translation</label>
+                                    <input type="text" class="correction-input" id="correction-english" 
+                                           placeholder="Leave empty to keep current value">
+                                </div>
+                                
+                                <div class="correction-field">
+                                    <label for="correction-german">German Word</label>
+                                    <input type="text" class="correction-input" id="correction-german" 
+                                           placeholder="Leave empty to keep current value">
+                                </div>
+                                
+                                <div class="correction-field">
+                                    <label for="correction-artikel">Article (der/die/das)</label>
+                                    <input type="text" class="correction-input" id="correction-artikel" 
+                                           placeholder="Leave empty to keep current value">
+                                </div>
+                            </div>
+                            
+                            <div class="correction-buttons">
+                                <button type="button" class="correction-btn accept-btn" onclick="acceptDatabaseAnswer()">
+                                    ✓ Keep Database Values
+                                </button>
+                                <button type="button" class="correction-btn suggest-btn" onclick="submitFullCorrection()">
+                                    💾 Submit Corrections
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+    
+    <div class="right-panel">
+        <h3>🎮 Controls & History</h3>
+        
+        <div class="audio-controls">
+            <div class="mode-toggle">
+                <span>📝 Text</span>
+                <div class="toggle-switch" id="audio-mode-toggle" onclick="toggleAudioMode()">
+                    <div class="toggle-slider"></div>
+                </div>
+                <span>🎙️ Audio</span>
+            </div>
+            <div id="audio-status" style="font-size: 12px; opacity: 0.8;">
+                Click to enable audio mode for speaking practice
+            </div>
+        </div>
+        
+        <div class="metric-card" style="background: linear-gradient(135deg, #28a745 0%, #20c997 100%);">
+            <div class="metric-value" id="correct-count">0</div>
+            <div class="metric-label">CORRECT ANSWERS</div>
+        </div>
+        
+        <div class="metric-card" style="background: linear-gradient(135deg, #dc3545 0%, #fd7e14 100%);">
+            <div class="metric-value" id="incorrect-count">0</div>
+            <div class="metric-label">NEEDS PRACTICE</div>
+        </div>
+        
+        <div class="recent-words">
+            <h4>📝 Recent Words</h4>
+            <div id="recent-words-list">
+                <div style="text-align: center; color: #6c757d; font-size: 14px;">Start practicing to see your progress!</div>
+            </div>
+        </div>
+        
+        <button class="reset-btn" onclick="resetProgress()">Reset Progress</button>
+    </div>
+    
+    {% endif %}
+
+    <script>
+        // Performance tracking variables
+        let performanceData = {
+            totalWords: 0,
+            correctAnswers: 0,
+            incorrectAnswers: 0,
+            currentStreak: 0,
+            bestStreak: 0,
+            recentWords: [],
+            wordsToday: 0,
+            lastSessionDate: null
+        };
+        
+        // Audio functionality variables
+        let audioMode = false;
+        let speechSynthesis = window.speechSynthesis;
+        let speechRecognition = null;
+        let isListening = false;
+        let englishVoice = null;
+        let germanVoice = null;
+        
+        // Initialize speech recognition if available
+        if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+            speechRecognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+            speechRecognition.continuous = false;
+            speechRecognition.interimResults = false;
+            speechRecognition.lang = 'de-DE';
+        }
+        
+        // Initialize voices for text-to-speech
+        function initializeVoices() {
+            const voices = speechSynthesis.getVoices();
+            
+            // Find English voice (prefer US or UK English)
+            englishVoice = voices.find(voice => 
+                voice.lang.startsWith('en-') && (voice.lang.includes('US') || voice.lang.includes('GB'))
+            ) || voices.find(voice => voice.lang.startsWith('en-'));
+            
+            // Find German voice
+            germanVoice = voices.find(voice => voice.lang.startsWith('de-'));
+            
+            console.log('Available voices initialized:', {
+                english: englishVoice ? englishVoice.name : 'None',
+                german: germanVoice ? germanVoice.name : 'None'
+            });
+        }
+        
+        // Toggle audio mode
+        function toggleAudioMode() {
+            audioMode = !audioMode;
+            const toggle = document.getElementById('audio-mode-toggle');
+            const status = document.getElementById('audio-status');
+            
+            if (audioMode) {
+                toggle.classList.add('active');
+                if (speechRecognition && speechSynthesis) {
+                    status.textContent = '🎙️ Audio mode enabled - speak your German answers!';
+                    status.style.color = '#28a745';
+                    
+                    // Initialize voices
+                    initializeVoices();
+                    
+                    // Update the form interface for audio mode
+                    updateFormForAudioMode();
+                } else {
+                    status.textContent = '❌ Audio not supported in this browser';
+                    status.style.color = '#dc3545';
+                    audioMode = false;
+                    toggle.classList.remove('active');
+                }
+            } else {
+                toggle.classList.remove('active');
+                status.textContent = 'Click to enable audio mode for speaking practice';
+                status.style.color = 'inherit';
+                
+                // Restore text mode
+                updateFormForTextMode();
+            }
+        }
+        
+        // Speak text using text-to-speech
+        function speakText(text, language = 'en') {
+            if (!speechSynthesis) return;
+            
+            // Stop any current speech
+            speechSynthesis.cancel();
+            
+            const utterance = new SpeechSynthesisUtterance(text);
+            
+            if (language === 'en' && englishVoice) {
+                utterance.voice = englishVoice;
+            } else if (language === 'de' && germanVoice) {
+                utterance.voice = germanVoice;
+            }
+            
+            utterance.rate = 0.8; // Slightly slower for learning
+            utterance.pitch = 1;
+            
+            speechSynthesis.speak(utterance);
+            
+            return new Promise((resolve) => {
+                utterance.onend = resolve;
+                utterance.onerror = resolve;
+            });
+        }
+        
+        // Update form interface for audio mode
+        function updateFormForAudioMode() {
+            const userInput = document.getElementById('user-input');
+            const submitButton = document.querySelector('button[type="submit"]');
+            const questionText = document.getElementById('question-text');
+            
+            if (userInput && submitButton) {
+                // Hide text input and submit button
+                userInput.style.display = 'none';
+                submitButton.style.display = 'none';
+                
+                // Create audio input container if it doesn't exist
+                let audioContainer = document.getElementById('audio-input-container');
+                if (!audioContainer) {
+                    audioContainer = document.createElement('div');
+                    audioContainer.id = 'audio-input-container';
+                    audioContainer.className = 'audio-input-container';
+                    
+                    // Create listening indicator (no button needed)
+                    const listeningIndicator = document.createElement('div');
+                    listeningIndicator.id = 'listening-indicator';
+                    listeningIndicator.className = 'listening-indicator';
+                    listeningIndicator.innerHTML = '🎤';
+                    
+                    // Create status text
+                    const statusText = document.createElement('div');
+                    statusText.id = 'audio-status-text';
+                    statusText.className = 'audio-status-text';
+                    statusText.textContent = 'Listening for your German answer...';
+                    
+                    audioContainer.appendChild(listeningIndicator);
+                    audioContainer.appendChild(statusText);
+                    
+                    // Insert after the umlaut buttons
+                    const umlautButtons = document.querySelector('.umlaut-buttons');
+                    if (umlautButtons) {
+                        umlautButtons.parentNode.insertBefore(audioContainer, umlautButtons.nextSibling);
+                    } else {
+                        userInput.parentNode.insertBefore(audioContainer, userInput.nextSibling);
+                    }
+                }
+                audioContainer.style.display = 'flex';
+                
+                // Automatically speak the English word when in audio mode
+                const englishWord = questionText ? questionText.textContent.replace('What is ', '').replace(' in German?', '').trim() : '';
+                if (englishWord) {
+                    setTimeout(() => {
+                        speakText(englishWord, 'en').then(() => {
+                            // Start auto-listening after speaking the question
+                            setTimeout(() => {
+                                startAutoListening();
+                            }, 1000);
+                        });
+                    }, 800);
+                }
+            }
+        }
+        
+        // Update form interface for text mode
+        function updateFormForTextMode() {
+            const userInput = document.getElementById('user-input');
+            const submitButton = document.querySelector('button[type="submit"]'); // Changed from input to button
+            const audioContainer = document.getElementById('audio-input-container');
+            
+            console.log('Updating for text mode:', { userInput, submitButton, audioContainer }); // Debug log
+            
+            if (userInput && submitButton) {
+                // Show text input and submit button
+                userInput.style.display = 'block';
+                submitButton.style.display = 'block';
+                
+                // Hide audio container
+                if (audioContainer) {
+                    audioContainer.style.display = 'none';
+                }
+            }
+        }
+        
+        // Start auto-listening (no button click required)
+        function startAutoListening() {
+            if (!speechRecognition || isListening) return;
+            
+            const indicator = document.getElementById('listening-indicator');
+            const userInput = document.getElementById('user-input');
+            const statusText = document.getElementById('audio-status-text');
+            
+            if (indicator) {
+                indicator.classList.add('listening');
+                indicator.innerHTML = '🔴';
+            }
+            if (statusText) {
+                statusText.textContent = '🎙️ Listening... speak your German answer now!';
+                statusText.style.color = '#dc3545';
+            }
+            isListening = true;
+            
+            speechRecognition.start();
+            
+            speechRecognition.onresult = function(event) {
+                const transcript = event.results[0][0].transcript;
+                console.log('Speech recognition result:', transcript);
+                
+                // Put the recognized text into the input field
+                userInput.value = transcript;
+                
+                // Show what was recognized
+                if (statusText) {
+                    statusText.textContent = `Recognized: "${transcript}" - submitting...`;
+                    statusText.style.color = '#28a745';
+                }
+                
+                // Automatically submit the form
+                setTimeout(() => {
+                    document.getElementById('vocab-form').dispatchEvent(new Event('submit'));
+                }, 800);
+            };
+            
+            speechRecognition.onerror = function(event) {
+                console.error('Speech recognition error:', event.error);
+                stopAutoListening();
+                if (statusText) {
+                    statusText.textContent = 'Speech recognition failed. Restarting in 3 seconds...';
+                    statusText.style.color = '#dc3545';
+                }
+                // Auto-restart listening after error
+                setTimeout(() => {
+                    if (audioMode) {
+                        startAutoListening();
+                    }
+                }, 3000);
+            };
+            
+            speechRecognition.onend = function() {
+                if (isListening && audioMode) {
+                    // Restart listening if we're still in audio mode and no result was captured
+                    setTimeout(() => {
+                        if (audioMode && !userInput.value) {
+                            startAutoListening();
+                        }
+                    }, 1000);
+                }
+                stopAutoListening();
+            };
+            
+            // Auto-restart after 8 seconds of no speech
+            setTimeout(() => {
+                if (isListening && audioMode) {
+                    speechRecognition.stop();
+                    if (statusText) {
+                        statusText.textContent = 'No speech detected. Restarting...';
+                        statusText.style.color = '#ffc107';
+                    }
+                }
+            }, 8000);
+        }
+        
+        // Stop auto-listening
+        function stopAutoListening() {
+            const indicator = document.getElementById('listening-indicator');
+            const statusText = document.getElementById('audio-status-text');
+            
+            if (indicator) {
+                indicator.classList.remove('listening');
+                indicator.innerHTML = '🎤';
+            }
+            
+            if (statusText && isListening && audioMode) {
+                statusText.textContent = 'Listening for your German answer...';
+                statusText.style.color = '#28a745';
+            }
+            
+            isListening = false;
+        }
+
+        // Start listening for speech (legacy function for compatibility)
+        function startListening() {
+            if (!speechRecognition || isListening) return;
+            
+            const micButton = document.getElementById('mic-button');
+            const userInput = document.getElementById('user-input');
+            const statusText = document.getElementById('audio-status-text');
+            
+            micButton.classList.add('recording');
+            micButton.innerHTML = '🔴';
+            micButton.title = 'Listening... speak now!';
+            if (statusText) {
+                statusText.textContent = '🎙️ Listening... speak your German answer now!';
+                statusText.style.color = '#dc3545';
+            }
+            isListening = true;
+            
+            speechRecognition.start();
+            
+            speechRecognition.onresult = function(event) {
+                const transcript = event.results[0][0].transcript;
+                console.log('Speech recognition result:', transcript);
+                
+                // Put the recognized text into the input field
+                userInput.value = transcript;
+                
+                // Show what was recognized
+                if (statusText) {
+                    statusText.textContent = `Recognized: "${transcript}" - submitting...`;
+                    statusText.style.color = '#28a745';
+                }
+                
+                // Automatically submit the form
+                setTimeout(() => {
+                    document.getElementById('vocab-form').dispatchEvent(new Event('submit'));
+                }, 800);
+            };
+            
+            speechRecognition.onerror = function(event) {
+                console.error('Speech recognition error:', event.error);
+                stopListening();
+                if (statusText) {
+                    statusText.textContent = 'Speech recognition failed. Try again!';
+                    statusText.style.color = '#dc3545';
+                }
+                setTimeout(() => {
+                    if (statusText) {
+                        statusText.textContent = 'Click 🎤 and speak the German translation';
+                        statusText.style.color = '#6c757d';
+                    }
+                }, 3000);
+            };
+            
+            speechRecognition.onend = function() {
+                stopListening();
+            };
+            
+            // Auto-stop after 10 seconds
+            setTimeout(() => {
+                if (isListening) {
+                    speechRecognition.stop();
+                    if (statusText) {
+                        statusText.textContent = 'Listening timeout. Click 🎤 to try again.';
+                        statusText.style.color = '#ffc107';
+                    }
+                }
+            }, 10000);
+        }
+        
+        // Stop listening for speech
+        function stopListening() {
+            const micButton = document.getElementById('mic-button');
+            const statusText = document.getElementById('audio-status-text');
+            
+            if (micButton) {
+                micButton.classList.remove('recording');
+                micButton.innerHTML = '🎤';
+                micButton.title = 'Click to speak your German answer';
+            }
+            
+            if (statusText && isListening) {
+                statusText.textContent = 'Click 🎤 and speak the German translation';
+                statusText.style.color = '#6c757d';
+            }
+            
+            isListening = false;
+        }
+
+        // Load performance data from localStorage
+        function loadPerformanceData() {
+            const saved = localStorage.getItem('deutschVocabProgress');
+            if (saved) {
+                const parsed = JSON.parse(saved);
+                // Check if it's a new day
+                const today = new Date().toDateString();
+                if (parsed.lastSessionDate !== today) {
+                    parsed.wordsToday = 0;
+                    parsed.lastSessionDate = today;
+                }
+                performanceData = { ...performanceData, ...parsed };
+            }
+            updateDashboard();
+        }
+
+        // Save performance data to localStorage
+        function savePerformanceData() {
+            performanceData.lastSessionDate = new Date().toDateString();
+            localStorage.setItem('deutschVocabProgress', JSON.stringify(performanceData));
+        }
+
+        // Update dashboard display
+        function updateDashboard() {
+            document.getElementById('total-words').textContent = performanceData.totalWords;
+            document.getElementById('correct-count').textContent = performanceData.correctAnswers;
+            document.getElementById('incorrect-count').textContent = performanceData.incorrectAnswers;
+            document.getElementById('current-streak').textContent = performanceData.currentStreak;
+            
+            // Calculate accuracy
+            const accuracy = performanceData.totalWords > 0 
+                ? Math.round((performanceData.correctAnswers / performanceData.totalWords) * 100)
+                : 0;
+            document.getElementById('accuracy-percent').textContent = accuracy + '%';
+            document.getElementById('accuracy-bar').style.width = accuracy + '%';
+            document.getElementById('accuracy-bar').textContent = accuracy + '%';
+            
+            // Update level progress
+            updateLevelProgress();
+            
+            // Update recent words list
+            updateRecentWordsList();
+        }
+        
+        // Update browser state with corrected values
+        function updateBrowserWithCorrection(metrics) {
+            if (metrics.corrected_values) {
+                const corrected = metrics.corrected_values;
+                
+                // Update hidden form fields with corrected values
+                if (corrected.german && document.querySelector('input[name="correct_deutsch"]')) {
+                    document.querySelector('input[name="correct_deutsch"]').value = corrected.german;
+                }
+                if (corrected.english && document.querySelector('input[name="english_word"]')) {
+                    document.querySelector('input[name="english_word"]').value = corrected.english;
+                }
+                if (corrected.artikel !== undefined && document.querySelector('input[name="artikel"]')) {
+                    document.querySelector('input[name="artikel"]').value = corrected.artikel || '';
+                }
+                
+                console.log('Browser state updated with corrections:', corrected);
+            }
+        }
+
+        // Update level progress display
+        function updateLevelProgress() {
+            const currentLevel = document.getElementById('current-level').textContent;
+            
+            fetch(`/vocab/${currentLevel}/progress`, {
+                method: 'GET'
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    const completedCount = data.completed_words || 0;
+                    const totalCount = data.total_words || 1;
+                    const percentage = Math.round((completedCount / totalCount) * 100);
+                    
+                    document.getElementById('completed-count').textContent = completedCount;
+                    document.getElementById('total-count').textContent = totalCount;
+                    
+                    const progressBar = document.getElementById('level-progress-bar');
+                    progressBar.style.width = percentage + '%';
+                    progressBar.textContent = percentage + '%';
+                }
+            })
+            .catch(error => console.error('Error updating level progress:', error));
+        }
+
+        // Update recent words list
+        function updateRecentWordsList() {
+            const container = document.getElementById('recent-words-list');
+            if (performanceData.recentWords.length === 0) {
+                container.innerHTML = '<div style="text-align: center; color: #6c757d; font-size: 14px;">Start practicing to see your progress!</div>';
+                return;
+            }
+            
+            const recentHTML = performanceData.recentWords.slice(-5).reverse().map(word => {
+                let className = 'word-correct';
+                let icon = '✅';
+                if (!word.correct && word.retry) {
+                    className = 'word-retry';
+                    icon = '🔄';
+                } else if (!word.correct) {
+                    className = 'word-incorrect';
+                    icon = '❌';
+                }
+                
+                return `
+                    <div class="word-item ${className}">
+                        <span><strong>${word.word}</strong> (${word.english})</span>
+                        <span>${icon}</span>
+                    </div>
+                `;
+            }).join('');
+            
+            container.innerHTML = recentHTML;
+        }
+
+        // Track performance metrics
+        function trackPerformance(metrics) {
+            performanceData.totalWords++;
+            performanceData.wordsToday++;
+            
+            if (metrics.correct) {
+                performanceData.correctAnswers++;
+                performanceData.currentStreak++;
+                if (performanceData.currentStreak > performanceData.bestStreak) {
+                    performanceData.bestStreak = performanceData.currentStreak;
+                }
+            } else {
+                performanceData.incorrectAnswers++;
+                performanceData.currentStreak = 0;
+            }
+            
+            // Add to recent words (keep last 10)
+            const wordData = {
+                word: metrics.word,
+                english: metrics.english,
+                correct: metrics.correct,
+                retry: metrics.retry,
+                timestamp: metrics.timestamp
+            };
+            
+            performanceData.recentWords.push(wordData);
+            if (performanceData.recentWords.length > 10) {
+                performanceData.recentWords = performanceData.recentWords.slice(-10);
+            }
+            
+            updateDashboard();
+            savePerformanceData();
+        }
+
+        // Reset progress function
+        function resetProgress() {
+            if (confirm('Are you sure you want to reset all your progress? This cannot be undone.')) {
+                // Call backend to reset server-side progress
+                fetch('/vocab/reset-all', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        // Clear all localStorage data
+                        localStorage.removeItem('deutschVocabProgress');
+                        
+                        // Clear any level-specific completion data
+                        for (let key in localStorage) {
+                            if (key.startsWith('completed_')) {
+                                localStorage.removeItem(key);
+                            }
+                        }
+                        
+                        // Reset local performance data
+                        performanceData = {
+                            totalWords: 0,
+                            correctAnswers: 0,
+                            incorrectAnswers: 0,
+                            currentStreak: 0,
+                            bestStreak: 0,
+                            recentWords: [],
+                            wordsToday: 0,
+                            lastSessionDate: null
+                        };
+                        
+                        // Update both dashboard and level progress
+                        updateDashboard();
+                        updateLevelProgress();
+                        
+                        alert('All progress has been reset successfully!');
+                    } else {
+                        console.error('Error resetting progress:', data.message);
+                        alert('Error resetting progress: ' + data.message);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error resetting progress:', error);
+                    alert('Error resetting progress. Please try again.');
+                });
+            }
+        }
+
+        // Handle correction submission
+        function submitFullCorrection() {
+            const correctedGerman = document.getElementById('correction-german').value.trim();
+            const correctedEnglish = document.getElementById('correction-english').value.trim();
+            const correctedArtikel = document.getElementById('correction-artikel').value.trim();
+            
+            // Check if at least one field has a value
+            if (!correctedGerman && !correctedEnglish && !correctedArtikel) {
+                alert('Please fill in at least one field to make a correction.');
+                // Return focus to main input after alert
+                document.getElementById('user-input').focus();
+                return;
+            }
+            
+            // Set correction flags and data
+            document.getElementById('correction-flag').value = 'true';
+            
+            // Add hidden fields for the corrections if they don't exist
+            let germanField = document.getElementById('corrected-german-field');
+            if (!germanField) {
+                germanField = document.createElement('input');
+                germanField.type = 'hidden';
+                germanField.name = 'corrected_german';
+                germanField.id = 'corrected-german-field';
+                document.getElementById('vocab-form').appendChild(germanField);
+            }
+            
+            let englishField = document.getElementById('corrected-english-field');
+            if (!englishField) {
+                englishField = document.createElement('input');
+                englishField.type = 'hidden';
+                englishField.name = 'corrected_english';
+                englishField.id = 'corrected-english-field';
+                document.getElementById('vocab-form').appendChild(englishField);
+            }
+            
+            let artikelField = document.getElementById('corrected-artikel-field');
+            if (!artikelField) {
+                artikelField = document.createElement('input');
+                artikelField.type = 'hidden';
+                artikelField.name = 'corrected_artikel';
+                artikelField.id = 'corrected-artikel-field';
+                document.getElementById('vocab-form').appendChild(artikelField);
+            }
+            
+            // Set the values
+            germanField.value = correctedGerman;
+            englishField.value = correctedEnglish;
+            artikelField.value = correctedArtikel;
+            
+            // Submit the correction
+            document.getElementById('vocab-form').dispatchEvent(new Event('submit'));
+        }
+
+        // Show/hide correction interface
+        function showCorrectionInterface() {
+            // Get current values
+            const currentGerman = document.querySelector('input[name="correct_deutsch"]').value;
+            const currentEnglish = document.querySelector('input[name="english_word"]').value;
+            const currentArtikel = document.querySelector('input[name="artikel"]').value;
+            
+            // Handle empty/None artikel properly
+            const displayArtikel = currentArtikel && currentArtikel !== 'None' ? currentArtikel : '';
+            const displayGermanFull = displayArtikel ? `${displayArtikel} ${currentGerman}` : currentGerman;
+            
+            // Update current values display
+            document.getElementById('current-german').textContent = displayGermanFull;
+            document.getElementById('current-english').textContent = currentEnglish;
+            document.getElementById('current-artikel').textContent = displayArtikel || 'None';
+            
+            // Pre-fill the correction fields with current values
+            document.getElementById('correction-german').value = currentGerman;
+            document.getElementById('correction-english').value = currentEnglish;
+            document.getElementById('correction-artikel').value = displayArtikel; // Use empty string instead of 'None'
+            
+            // Show the interface
+            document.getElementById('correction-interface').style.display = 'block';
+            // DON'T auto-focus on correction fields - keep focus on main input
+        }
+
+        function hideCorrectionInterface() {
+            document.getElementById('correction-interface').style.display = 'none';
+            
+            // Clear the fields
+            document.getElementById('correction-german').value = '';
+            document.getElementById('correction-english').value = '';
+            document.getElementById('correction-artikel').value = '';
+        }
+
+        function insertUmlaut(char) {
+            const inputField = document.getElementById('user-input');
+            const cursorPos = inputField.selectionStart;
+            const textBefore = inputField.value.substring(0, cursorPos);
+            const textAfter = inputField.value.substring(inputField.selectionEnd, inputField.value.length);
+            
+            inputField.value = textBefore + char + textAfter;
+            inputField.focus();
+            inputField.setSelectionRange(cursorPos + 1, cursorPos + 1);
+        }
+
+        document.getElementById('vocab-form').onsubmit = function(event) {
+            event.preventDefault();
+            const formData = new FormData(event.target);
+
+            fetch("", {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                const messageElement = document.getElementById('response-message');
+                const card = document.getElementById('vocab-card');
+                const questionText = document.getElementById('question-text');
+                const userInput = document.getElementById('user-input');
+                const retryFlag = document.getElementById('retry-flag');
+                const correctionFlag = document.getElementById('correction-flag');
+                
+                messageElement.innerText = data.message;
+                messageElement.className = 'message ' + data.type;
+                
+                // Track performance if metrics are provided
+                if (data.metrics) {
+                    trackPerformance(data.metrics);
+                }
+                
+                if (data.type === 'success' || data.type === 'correction_submitted') {
+                    // Hide correction interface
+                    hideCorrectionInterface();
+                    
+                    // Audio feedback for correct answers
+                    if (audioMode && data.type === 'success' && data.metrics && data.metrics.word) {
+                        // Speak the correct German word
+                        const correctGerman = data.metrics.word;
+                        const artikel = data.metrics.artikel || '';
+                        const fullGermanWord = artikel ? `${artikel} ${correctGerman}` : correctGerman;
+                        
+                        setTimeout(() => {
+                            speakText(fullGermanWord, 'de');
+                        }, 500);
+                    }
+                    
+                    // Show CSV update status if it's a correction
+                    if (data.type === 'correction_submitted' && data.metrics && data.metrics.update_success !== undefined) {
+                        const statusDiv = document.createElement('div');
+                        statusDiv.className = 'csv-update-status ' + (data.metrics.update_success ? 'csv-success' : 'csv-warning');
+                        statusDiv.innerHTML = data.metrics.update_success 
+                            ? '✅ Database file updated successfully!' 
+                            : '⚠️ Note: Changes logged but database file not updated';
+                        messageElement.appendChild(statusDiv);
+                        
+                        // Update browser state with corrected values if correction was successful
+                        if (data.metrics.update_success) {
+                            updateBrowserWithCorrection(data.metrics);
+                        }
+                    }
+                    
+                    // Add flip animation without mirror effect
+                    card.classList.add('flipped');
+                    
+                    // Create a smooth transition to the next word
+                    setTimeout(() => {
+                        card.style.opacity = '0';
+                        card.style.transform = 'scale(0.9)';
+                        
+                        setTimeout(() => {
+                            // Reset correction flags
+                            correctionFlag.value = 'false';
+                            
+                            // Clean up any correction fields
+                            const fieldsToRemove = ['corrected-german-field', 'corrected-english-field', 'corrected-artikel-field'];
+                            fieldsToRemove.forEach(id => {
+                                const field = document.getElementById(id);
+                                if (field) field.remove();
+                            });
+                            
+                            // Reload with the same level
+                            const currentLevel = document.getElementById('level-select').value;
+                            const audioParam = audioMode ? '&audio=true' : '';
+                            window.location.href = '?level=' + encodeURIComponent(currentLevel) + audioParam;
+                        }, 300);
+                    }, 1200); // Longer delay to show the update status
+                } else if (data.type === 'retry_with_correction') {
+                    // Change to retry mode with correction option
+                    card.classList.add('retry-mode');
+                    questionText.innerHTML = 'Type the correct answer: <strong>' + data.artikel + ' ' + data.correct_answer + '</strong>';
+                    userInput.value = '';
+                    userInput.placeholder = 'Type the correct German word...';
+                    retryFlag.value = 'true';
+                    
+                    // Show correction interface but keep focus on main input
+                    showCorrectionInterface();
+                    userInput.focus(); // Ensure focus stays on main input
+                    
+                    // Update hidden fields for retry
+                    document.querySelector('input[name="correct_deutsch"]').value = data.correct_answer;
+                    document.querySelector('input[name="artikel"]').value = data.artikel;
+                    document.querySelector('input[name="english_word"]').value = data.english_word;
+                } else if (data.type === 'error_with_correction') {
+                    // Show correction interface for persistent errors but keep focus on main input
+                    showCorrectionInterface();
+                    userInput.focus(); // Ensure focus stays on main input
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                const messageElement = document.getElementById('response-message');
+                messageElement.innerText = 'An error occurred. Please try again.';
+                messageElement.className = 'message error';
+            });
+        }
+
+        document.getElementById('level-select').onchange = function() {
+            const selectedLevel = this.value;
+            // Use GET request with query parameter to maintain level selection
+            window.location.href = '?level=' + encodeURIComponent(selectedLevel);
+        }
+
+        // Initialize performance tracking when page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            loadPerformanceData();
+            
+            // Initialize speech synthesis voices
+            if (speechSynthesis) {
+                speechSynthesis.onvoiceschanged = initializeVoices;
+                initializeVoices(); // Call immediately in case voices are already loaded
+            }
+            
+            // Check if audio mode should be enabled from URL parameter
+            const urlParams = new URLSearchParams(window.location.search);
+            if (urlParams.get('audio') === 'true') {
+                setTimeout(() => {
+                    toggleAudioMode();
+                    // Start auto-listening after a delay to ensure everything is initialized
+                    setTimeout(() => {
+                        if (audioMode) {
+                            startAutoListening();
+                        }
+                    }, 2000);
+                }, 1000); // Wait for voices to be initialized
+            }
+            
+            const inputField = document.querySelector('input[name="user_input"]');
+            if (inputField) {
+                inputField.focus();
+            }
+        });
+
+        // Allow Enter key to work properly
+        document.getElementById('user-input').addEventListener('keypress', function(event) {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                document.getElementById('vocab-form').dispatchEvent(new Event('submit'));
+            }
+        });
+    </script>
+</body>
+</html>
+{% endblock %}
