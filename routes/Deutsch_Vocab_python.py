@@ -385,7 +385,18 @@ def deutsch_vocab():
         # Don't display 'nan' if Artikel is blank
         artikel_display = artikel if pd.notna(artikel) else ''
 
-        return render_template('Deutsch_Vocab_html.html', english_word=english_word, correct_deutsch=deutsch_word, artikel=artikel_display, level=level, level_options=level_options)
+        # Get total words for current level for progress display
+        total_words_for_level = len(level_vocab)
+        completed_words_for_level = len(completed_words)
+
+        return render_template('Deutsch_Vocab_html.html', 
+                             english_word=english_word, 
+                             correct_deutsch=deutsch_word, 
+                             artikel=artikel_display, 
+                             level=level, 
+                             level_options=level_options,
+                             total_words=total_words_for_level,
+                             completed_words=completed_words_for_level)
 
     except Exception as e:
         return render_template('Deutsch_Vocab_html.html', error="Error occurred: " + str(e), level_options=level_options)

@@ -909,13 +909,13 @@
         <div class="progress-section">
             <h4>🎯 Level Progress</h4>
             <div class="completion-progress">
-                <span id="completion-count">0 / 586 words completed</span>
+                <span id="completion-count">{{ completed_words or 0 }} / {{ total_words or 0 }} words completed</span>
             </div>
             <div class="progress-bar-container">
                 <div class="progress-bar-fill" id="completion-progress-bar" style="width: 0%"></div>
             </div>
             <div class="completion-stats">
-                <span>Current Level: </span><span id="current-level">A1.1</span>
+                <span>Current Level: </span><span id="current-level">{{ level }}</span>
             </div>
         </div>
         
@@ -1974,6 +1974,20 @@
         // Initialize performance tracking when page loads
         document.addEventListener('DOMContentLoaded', function() {
             loadPerformanceData();
+            
+            // Initialize progress bar with server data
+            const totalWords = {{ total_words or 0 }};
+            const completedWords = {{ completed_words or 0 }};
+            if (totalWords > 0) {
+                const percentage = Math.round((completedWords / totalWords) * 100);
+                const progressBar = document.getElementById('completion-progress-bar');
+                if (progressBar) {
+                    progressBar.style.width = percentage + '%';
+                }
+            }
+            
+            // Update level progress from server
+            updateLevelProgress();
             
             // Initialize speech synthesis voices
             if (speechSynthesis) {
