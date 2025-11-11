@@ -819,6 +819,86 @@
             transform: translateY(-1px);
             box-shadow: 0 4px 12px rgba(0,123,255,0.3);
         }
+        
+        /* Card and form styles */
+        .card-container {
+            display: flex;
+            justify-content: center;
+            margin: 20px 0;
+        }
+        
+        .card {
+            background: white;
+            border-radius: 16px;
+            padding: 30px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.12);
+            width: 100%;
+            max-width: 500px;
+            transition: all 0.3s ease;
+        }
+        
+        .card.flipped {
+            transform: rotateY(5deg);
+            box-shadow: 0 12px 40px rgba(0,0,0,0.2);
+        }
+        
+        .form-content h3 {
+            text-align: center;
+            margin-bottom: 20px;
+            color: #2c3e50;
+        }
+        
+        .card input[type="text"] {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            font-size: 16px;
+            margin-bottom: 15px;
+            transition: border-color 0.3s ease;
+        }
+        
+        .card input[type="text"]:focus {
+            outline: none;
+            border-color: #28a745;
+        }
+        
+        .umlaut-buttons {
+            display: flex;
+            gap: 8px;
+            justify-content: center;
+            margin: 15px 0;
+            flex-wrap: wrap;
+        }
+        
+        .umlaut-btn {
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+            color: white;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.2s ease;
+        }
+        
+        .umlaut-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(40,167,69,0.3);
+        }
+        
+        #level-selector {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        
+        #level-select {
+            padding: 8px 12px;
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            font-size: 14px;
+            margin-left: 10px;
+        }
     </style>
 </head>
 <body>
@@ -1025,7 +1105,6 @@
         </div>
     </div>
 
-    
     
     
     
@@ -1460,18 +1539,44 @@
 
         // Update dashboard display
         function updateDashboard() {
-            document.getElementById('total-words').textContent = performanceData.totalWords;
-            document.getElementById('correct-count').textContent = performanceData.correctAnswers;
-            document.getElementById('incorrect-count').textContent = performanceData.incorrectAnswers;
-            document.getElementById('current-streak').textContent = performanceData.currentStreak;
+            // Update words practiced (was total-words)
+            const wordsElement = document.getElementById('words-practiced');
+            if (wordsElement) {
+                wordsElement.textContent = performanceData.totalWords;
+            }
             
-            // Calculate accuracy
+            // Update correct/incorrect counts
+            const correctElement = document.getElementById('correct-count');
+            if (correctElement) {
+                correctElement.textContent = performanceData.correctAnswers;
+            }
+            
+            const incorrectElement = document.getElementById('incorrect-count');
+            if (incorrectElement) {
+                incorrectElement.textContent = performanceData.incorrectAnswers;
+            }
+            
+            // Update current streak
+            const streakElement = document.getElementById('current-streak');
+            if (streakElement) {
+                streakElement.textContent = performanceData.currentStreak;
+            }
+            
+            // Calculate and update accuracy
             const accuracy = performanceData.totalWords > 0 
                 ? Math.round((performanceData.correctAnswers / performanceData.totalWords) * 100)
                 : 0;
-            document.getElementById('accuracy-percent').textContent = accuracy + '%';
-            document.getElementById('accuracy-bar').style.width = accuracy + '%';
-            document.getElementById('accuracy-bar').textContent = accuracy + '%';
+            
+            const accuracyElement = document.getElementById('accuracy-rate');
+            if (accuracyElement) {
+                accuracyElement.textContent = accuracy + '%';
+            }
+            
+            // Update completion progress bar
+            const progressBarElement = document.getElementById('completion-progress-bar');
+            if (progressBarElement) {
+                progressBarElement.style.width = accuracy + '%';
+            }
             
             // Update level progress
             updateLevelProgress();
@@ -1502,7 +1607,10 @@
 
         // Update level progress display
         function updateLevelProgress() {
-            const currentLevel = document.getElementById('current-level').textContent;
+            const currentLevelElement = document.getElementById('current-level');
+            if (!currentLevelElement) return;
+            
+            const currentLevel = currentLevelElement.textContent;
             
             fetch(`/vocab/${currentLevel}/progress`, {
                 method: 'GET'
@@ -1514,12 +1622,17 @@
                     const totalCount = data.total_words || 1;
                     const percentage = Math.round((completedCount / totalCount) * 100);
                     
-                    document.getElementById('completed-count').textContent = completedCount;
-                    document.getElementById('total-count').textContent = totalCount;
+                    // Update completion count display (left panel)
+                    const completionElement = document.getElementById('completion-count');
+                    if (completionElement) {
+                        completionElement.textContent = `${completedCount} / ${totalCount} words completed`;
+                    }
                     
-                    const progressBar = document.getElementById('level-progress-bar');
-                    progressBar.style.width = percentage + '%';
-                    progressBar.textContent = percentage + '%';
+                    // Update progress bar (left panel)
+                    const progressBar = document.getElementById('completion-progress-bar');
+                    if (progressBar) {
+                        progressBar.style.width = percentage + '%';
+                    }
                 }
             })
             .catch(error => console.error('Error updating level progress:', error));
