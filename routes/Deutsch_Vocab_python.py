@@ -17,6 +17,7 @@ except Exception as e:
 missed_words = []
 current_word_queue = []
 completed_words = []  # Track words that have been completed successfully
+current_level = None  # Track current level to reset queues on level change
 
 # Get distinct levels for filtering
 level_options = vocab_df['Level'].dropna().unique()
@@ -154,11 +155,19 @@ def update_vocab_csv(english_word, old_german, old_artikel, new_german, new_engl
 
 @Deutsch_Vocab_blueprint.route('/Deutsch_Vocab_html', methods=['GET', 'POST'])
 def deutsch_vocab():
-    global missed_words, current_word_queue, completed_words
+    global missed_words, current_word_queue, completed_words, current_level
     
     try:
         # Get level from form (POST) or query params (GET), default to A1.1
         level = request.form.get('level') or request.args.get('level', 'A1.1')
+        
+        # Check if level has changed, and reset queues if so
+        if current_level != level:
+            print(f"Level changed from {current_level} to {level}, resetting queues")
+            missed_words = []
+            current_word_queue = []
+            completed_words = []
+            current_level = level
         
         # Filter the dataframe based on the level
         level_vocab = vocab_df[vocab_df['Level'] == level]
