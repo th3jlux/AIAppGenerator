@@ -726,8 +726,137 @@
             color: #721c24;
             border: 1px solid #f5c6cb;
         }
+        
+        /* Metric cards */
+        .metric-card {
+            border-radius: 12px;
+            padding: 16px;
+            margin: 12px 0;
+            text-align: center;
+            color: white;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+        
+        .metric-value {
+            font-size: 24px;
+            font-weight: bold;
+            margin-bottom: 4px;
+        }
+        
+        .metric-label {
+            font-size: 11px;
+            opacity: 0.9;
+            font-weight: 500;
+            letter-spacing: 0.5px;
+        }
+        
+        /* Streak display */
+        .streak-display {
+            background: linear-gradient(135deg, #fd7e14 0%, #ffc107 100%);
+            border-radius: 12px;
+            padding: 12px;
+            margin: 12px 0;
+            text-align: center;
+        }
+        
+        .streak-bar {
+            color: white;
+            font-size: 14px;
+            font-weight: bold;
+        }
+        
+        /* Recent words */
+        .recent-words h4 {
+            margin: 0 0 10px 0;
+            color: #2c3e50;
+            font-size: 14px;
+            text-align: center;
+        }
+        
+        /* Reset button */
+        .reset-btn {
+            width: 100%;
+            background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+            color: white;
+            border: none;
+            padding: 10px;
+            border-radius: 8px;
+            font-weight: bold;
+            cursor: pointer;
+            margin-top: 15px;
+            transition: all 0.2s ease;
+        }
+        
+        .reset-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(220,53,69,0.3);
+        }
+        
+        /* Completion screen */
+        .completion-screen {
+            background: white;
+            border-radius: 16px;
+            padding: 30px;
+            text-align: center;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.12);
+        }
+        
+        .completion-btn {
+            display: inline-block;
+            background: linear-gradient(135deg, #007bff 0%, #0056b3 100%);
+            color: white;
+            padding: 12px 20px;
+            border-radius: 8px;
+            text-decoration: none;
+            margin: 5px;
+            border: none;
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.2s ease;
+        }
+        
+        .completion-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(0,123,255,0.3);
+        }
     </style>
 </head>
+<body>
+    <!-- Left Panel: Dashboard -->
+    <div class="dashboard">
+        <h3>📊 Progress Tracking</h3>
+        
+        <div class="progress-section">
+            <h4>🎯 Level Progress</h4>
+            <div class="completion-progress">
+                <span id="completion-count">0 / 586 words completed</span>
+            </div>
+            <div class="progress-bar-container">
+                <div class="progress-bar-fill" id="completion-progress-bar" style="width: 0%"></div>
+            </div>
+            <div class="completion-stats">
+                <span>Current Level: </span><span id="current-level">A1.1</span>
+            </div>
+        </div>
+        
+        <div class="metric-card" style="background: linear-gradient(135deg, #6f42c1 0%, #6610f2 100%);">
+            <div class="metric-value" id="words-practiced">15</div>
+            <div class="metric-label">WORDS PRACTICED</div>
+        </div>
+        
+        <div class="metric-card" style="background: linear-gradient(135deg, #6f42c1 0%, #6610f2 100%);">
+            <div class="metric-value" id="accuracy-rate">80%</div>
+            <div class="metric-label">ACCURACY</div>
+        </div>
+        
+        <div class="streak-display">
+            <div class="streak-bar" id="streak-bar">
+                <span class="streak-text">🔥 Current Streak: <span id="current-streak">1</span></span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Center Panel: Main Content -->
     {% if completed %}
     <div class="main-content">
         <div class="completion-screen">
@@ -896,118 +1025,11 @@
         </div>
     </div>
 
-    <div class="dashboard">
-        <h3>📊 Progress Tracking</h3>
-        
-        <div class="progress-section">
-            <h4>🎯 Level Progress</h4>
-            <div class="completion-stats">
-                <span id="completed-count">0</span> / <span id="total-count">0</span> words completed
-            </div>
-            <div class="progress-bar-container">
-                <div class="progress-bar-fill" id="level-progress-bar" style="width: 0%">0%</div>
-            </div>
-            <div style="font-size: 12px; opacity: 0.9;">
-                Current Level: <strong id="current-level">{{ level }}</strong>
-            </div>
-        </div>
-        
-        <div class="metric-card">
-            <div class="metric-value" id="total-words">0</div>
-            <div class="metric-label">WORDS PRACTICED</div>
-        </div>
-        
-        <div class="metric-card">
-            <div class="metric-value" id="accuracy-percent">0%</div>
-            <div class="metric-label">ACCURACY</div>
-        </div>
-        
-        <div class="accuracy-bar">
-            <div class="accuracy-fill" id="accuracy-bar" style="width: 0%">0%</div>
-        </div>
-        
-        <div class="streak-badge" id="streak-badge">
-            🔥 Current Streak: <span id="current-streak">0</span>
-        </div>
-    </div>
     
-    <div class="main-content">
-        {% if english_word %}
-        <div class="card-container">
-            <div class="card" id="vocab-card">
-                <h3 id="question-text">What is <strong>{{ english_word }}</strong> in German?</h3>
-                
-                <div class="form-content">
-                    <form method="POST" id="vocab-form">
-                        <input type="hidden" name="correct_deutsch" value="{{ correct_deutsch }}">
-                        <input type="hidden" name="artikel" value="{{ artikel }}">
-                        <input type="hidden" name="level" value="{{ level }}">
-                        <input type="hidden" name="is_retry" value="false" id="retry-flag">
-                        <input type="hidden" name="is_correction" value="false" id="correction-flag">
-                        <input type="hidden" name="english_word" value="{{ english_word }}">
-                        
-                        <input type="text" name="user_input" id="user-input" placeholder="Type the German translation..." autocomplete="off" autofocus>
-                        
-                        <div class="umlaut-buttons">
-                            <button type="button" class="umlaut-btn" onclick="insertUmlaut('ä')" title="Insert ä">ä</button>
-                            <button type="button" class="umlaut-btn" onclick="insertUmlaut('ö')" title="Insert ö">ö</button>
-                            <button type="button" class="umlaut-btn" onclick="insertUmlaut('ü')" title="Insert ü">ü</button>
-                            <button type="button" class="umlaut-btn" onclick="insertUmlaut('Ä')" title="Insert Ä">Ä</button>
-                            <button type="button" class="umlaut-btn" onclick="insertUmlaut('Ö')" title="Insert Ö">Ö</button>
-                            <button type="button" class="umlaut-btn" onclick="insertUmlaut('Ü')" title="Insert Ü">Ü</button>
-                            <button type="button" class="umlaut-btn" onclick="insertUmlaut('ß')" title="Insert ß">ß</button>
-                        </div>
-                    </div>
-                    
-                    <div class="submit-section">
-                        <button type="submit">Submit</button>
-                        <div class="message" id="response-message"></div>
-                        <div class="correction-interface" id="correction-interface" style="display: none;">
-                            <h4>✏️ Edit Vocabulary Entry</h4>
-                            
-                            <div class="current-values">
-                                <h5>Current Database Values:</h5>
-                                <div class="current-value"><strong>English:</strong> <span id="current-english"></span></div>
-                                <div class="current-value"><strong>German:</strong> <span id="current-german"></span></div>
-                                <div class="current-value"><strong>Article:</strong> <span id="current-artikel"></span></div>
-                            </div>
-                            
-                            <div class="correction-fields">
-                                <div class="correction-field">
-                                    <label for="correction-english">English Translation</label>
-                                    <input type="text" class="correction-input" id="correction-english" 
-                                           placeholder="Leave empty to keep current value">
-                                </div>
-                                
-                                <div class="correction-field">
-                                    <label for="correction-german">German Word</label>
-                                    <input type="text" class="correction-input" id="correction-german" 
-                                           placeholder="Leave empty to keep current value">
-                                </div>
-                                
-                                <div class="correction-field">
-                                    <label for="correction-artikel">Article (der/die/das)</label>
-                                    <input type="text" class="correction-input" id="correction-artikel" 
-                                           placeholder="Leave empty to keep current value">
-                                </div>
-                            </div>
-                            
-                            <div class="correction-buttons">
-                                <button type="button" class="correction-btn accept-btn" onclick="acceptDatabaseAnswer()">
-                                    ✓ Keep Database Values
-                                </button>
-                                <button type="button" class="correction-btn suggest-btn" onclick="submitFullCorrection()">
-                                    💾 Submit Corrections
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </form>
-            </div>
-        </div>
-    </div>
-    {% endif %}
     
+    
+    
+    <!-- Right Panel: Controls & Stats -->
     <div class="right-panel">
         <h3>🎮 Controls & History</h3>
         
