@@ -14,40 +14,104 @@ except Exception as e:
     vocab_df = pd.DataFrame(columns=['Artikel', 'Deutsch', 'English', 'Level'])
     print('Error loading vocabulary file:', e)
 
-# Global variables
-missed_words = []
-current_word_queue = []
-# progress_data stores completed words per level: { "A1.1": [[artikel, deutsch, english], ...], ... }
+# Get distinct levels for filtering
+level_options = vocab_df['Level'].dropna().unique()
+
+# progress_data stores complete vocab state per level with status tracking
+# Structure: { "A1.1": [{"artikel": "der", "deutsch": "Hund", "english": "dog", "status": "notyetanswered"}, ...], ... }
 progress_data = {}
-current_level = None  # Track current level to reset queues on level change
 
 # Progress file on disk
 PROGRESS_FILE = 'data/progress.json'
 
 def load_progress():
+    """Load progress from disk and ensure all vocab words are initialized with status"""
     global progress_data
     try:
         if os.path.exists(PROGRESS_FILE):
             with open(PROGRESS_FILE, 'r', encoding='utf-8') as f:
                 progress_data = json.load(f)
-                # Convert keys to str and ensure lists of tuples
-                for lvl, items in list(progress_data.items()):
-                    # store as list of tuples for internal comparison
-                    progress_data[lvl] = [tuple(i) for i in items]
         else:
             progress_data = {}
+            
+        # Initialize any missing levels with complete vocab
+        initialize_missing_levels()
+        
     except Exception as e:
         print('Error loading progress file:', e)
         progress_data = {}
+        initialize_missing_levels()
+
+def initialize_missing_levels():
+    """Initialize progress for any levels not in progress_data"""
+    for level in level_options:
+        if level not in progress_data:
+            progress_data[level] = []
+            # Add all words for this level with 'notyetanswered' status
+            level_vocab = vocab_df[vocab_df['Level'] == level]
+            for _, row in level_vocab.iterrows():
+                artikel = row['Artikel'] if pd.notna(row['Artikel']) else ''
+                deutsch = row['Deutsch']
+                english = row['English']
+                
+                word_entry = {
+                    'artikel': artikel,
+                    'deutsch': deutsch,
+                    'english': english,
+                    'status': 'notyetanswered'
+                }
+                progress_data[level].append(word_entry)
 
 def save_progress():
+    """Save progress to disk"""
     try:
-        # Convert tuples to lists for JSON serialization
-        serializable = {lvl: [list(t) for t in items] for lvl, items in progress_data.items()}
         with open(PROGRESS_FILE, 'w', encoding='utf-8') as f:
-            json.dump(serializable, f, ensure_ascii=False, indent=2)
+            json.dump(progress_data, f, ensure_ascii=False, indent=2)
     except Exception as e:
         print('Error saving progress file:', e)
+
+def get_words_to_practice(level):
+    """Get words that need practice (status: notyetanswered or incorrect)"""
+    if level not in progress_data:
+        initialize_missing_levels()
+    
+    words_to_practice = [
+        word for word in progress_data[level] 
+        if word['status'] in ['notyetanswered', 'incorrect']
+    ]
+    return words_to_practice
+
+def update_word_status(level, artikel, deutsch, english, new_status):
+    """Update the status of a specific word"""
+    if level not in progress_data:
+        initialize_missing_levels()
+    
+    for word in progress_data[level]:
+        if (word['artikel'] == artikel and 
+            word['deutsch'] == deutsch and 
+            word['english'] == english):
+            word['status'] = new_status
+            save_progress()
+            return True
+    return False
+
+def get_completion_stats(level):
+    """Get completion statistics for a level"""
+    if level not in progress_data:
+        initialize_missing_levels()
+    
+    total = len(progress_data[level])
+    correct = len([w for w in progress_data[level] if w['status'] == 'correct'])
+    incorrect = len([w for w in progress_data[level] if w['status'] == 'incorrect'])
+    not_answered = len([w for w in progress_data[level] if w['status'] == 'notyetanswered'])
+    
+    return {
+        'total': total,
+        'correct': correct,
+        'incorrect': incorrect,
+        'not_answered': not_answered,
+        'completed': not_answered == 0 and incorrect == 0
+    }
 
 # Get distinct levels for filtering
 level_options = vocab_df['Level'].dropna().unique()
@@ -188,31 +252,153 @@ def update_vocab_csv(english_word, old_german, old_artikel, new_german, new_engl
 
 @Deutsch_Vocab_blueprint.route('/Deutsch_Vocab_html', methods=['GET', 'POST'])
 def deutsch_vocab():
-    global missed_words, current_word_queue, progress_data, current_level
-    
     try:
         # Get level from form (POST) or query params (GET), default to A1.1
         level = request.form.get('level') or request.args.get('level', 'A1.1')
         
-        # Check if level has changed, and reset queues if so
-        if current_level != level:
-            print(f"Level changed from {current_level} to {level}, resetting queues")
-            # Reset only the in-memory queues for the UI; keep persisted progress_data by level
-            missed_words = []
-            current_word_queue = []
-            current_level = level
+        # Ensure progress is initialized for this level
+        if level not in progress_data:
+            initialize_missing_levels()
         
         # Filter the dataframe based on the level
         level_vocab = vocab_df[vocab_df['Level'] == level]
 
         if request.method == 'POST':
-            # Check if this is a level change request
-            if request.form.get('level') and not request.form.get('english_word'):
-                # This is a level change, reset word queues
-                missed_words = []
-                current_word_queue = []
-                completed_words = []
-            elif request.form.get('english_word'):
+            if request.form.get('english_word'):
+                # This is a word submission
+                english_word = request.form['english_word']
+                user_input = request.form['user_input'].strip()
+                correct_deutsch = request.form['correct_deutsch'].strip()
+                artikel = request.form['artikel'].strip()
+                is_retry = request.form.get('is_retry', 'false') == 'true'
+
+                # Check if this is a correction submission
+                is_correction = request.form.get('is_correction', 'false') == 'true'
+                corrected_german = request.form.get('corrected_german', '').strip()
+                corrected_english = request.form.get('corrected_english', '').strip()
+                corrected_artikel = request.form.get('corrected_artikel', '').strip()
+                
+                if is_correction and (corrected_german or corrected_english or corrected_artikel):
+                    # Handle CSV correction submission
+                    correction_details = {
+                        'original': {
+                            'german': correct_deutsch,
+                            'english': english_word,
+                            'artikel': artikel
+                        },
+                        'corrected': {
+                            'german': corrected_german or correct_deutsch,
+                            'english': corrected_english or english_word,
+                            'artikel': corrected_artikel if corrected_artikel else artikel
+                        }
+                    }
+                    
+                    # Update the CSV file with corrections
+                    update_success = update_vocab_csv(
+                        english_word=english_word,
+                        old_german=correct_deutsch,
+                        old_artikel=artikel,
+                        new_german=corrected_german,
+                        new_english=corrected_english,
+                        new_artikel=corrected_artikel,
+                        level=level
+                    )
+                    
+                    message = 'Thank you! Your corrections have been saved to the database: {}'.format(
+                        ', '.join([f"{k}: '{correction_details['corrected'][k]}'" for k in correction_details['corrected'] 
+                                 if correction_details['corrected'][k] != correction_details['original'][k]])
+                    ) if update_success else 'Your correction was noted but there was an issue updating the file.'
+                    
+                    return jsonify({
+                        'type': 'correction_submitted', 
+                        'message': message,
+                        'metrics': {
+                            'correct': True,
+                            'retry': False,
+                            'correction': True,
+                            'word': correct_deutsch,
+                            'english': english_word,
+                            'artikel': artikel,
+                            'update_success': update_success,
+                            'timestamp': datetime.now().isoformat()
+                        }
+                    })
+                
+                # Process regular answer submission
+                user_clean = user_input.lower().strip()
+                correct_clean = correct_deutsch.lower().strip()
+                artikel_clean = artikel.lower().strip() if artikel else ''
+                correct_with_artikel = f"{artikel_clean} {correct_clean}".strip()
+                
+                # Check if answer is correct
+                is_correct = (user_clean == correct_clean or 
+                             user_clean == correct_with_artikel or
+                             (artikel_clean and user_clean == f"{correct_clean} {artikel_clean}"))
+
+                if is_correct:
+                    # Update word status to 'correct' (only if not practice retry)
+                    if not is_retry:
+                        # First-time correct answer
+                        update_word_status(level, artikel, correct_deutsch, english_word, 'correct')
+                        message = 'Correct! The word "{}" is {} {}.'.format(english_word, artikel, correct_deutsch)
+                    else:
+                        # Practice retry - don't change status, just acknowledge
+                        message = 'Good practice! Remember: "{}" is {} {}.'.format(english_word, artikel, correct_deutsch)
+                    
+                    flash_message = {
+                        'type': 'success',
+                        'message': message,
+                        'metrics': {
+                            'correct': True,
+                            'retry': is_retry,
+                            'word': correct_deutsch,
+                            'english': english_word,
+                            'artikel': artikel,
+                            'timestamp': datetime.now().isoformat()
+                        }
+                    }
+                else:
+                    # Incorrect answer
+                    if not is_retry:
+                        # First attempt wrong - mark as incorrect for spaced repetition
+                        update_word_status(level, artikel, correct_deutsch, english_word, 'incorrect')
+                        flash_message = {
+                            'type': 'retry_with_correction',
+                            'message': 'Incorrect. The correct answer is "{} {}". Please practice typing it:'.format(artikel, correct_deutsch),
+                            'correct_answer': correct_deutsch,
+                            'artikel': artikel,
+                            'english_word': english_word,
+                            'metrics': {
+                                'correct': False,
+                                'retry': False,
+                                'word': correct_deutsch,
+                                'english': english_word,
+                                'artikel': artikel,
+                                'user_answer': user_input,
+                                'timestamp': datetime.now().isoformat()
+                            }
+                        }
+                    else:
+                        # Retry still wrong - status already 'incorrect', just acknowledge
+                        flash_message = {
+                            'type': 'error_with_correction',
+                            'message': 'Still incorrect. The correct answer is "{} {}". Try again or suggest a correction.'.format(artikel, correct_deutsch),
+                            'correct_answer': correct_deutsch,
+                            'artikel': artikel,
+                            'english_word': english_word,
+                            'user_answer': user_input,
+                            'metrics': {
+                                'correct': False,
+                                'retry': True,
+                                'word': correct_deutsch,
+                                'english': english_word,
+                                'artikel': artikel,
+                                'user_answer': user_input,
+                                'timestamp': datetime.now().isoformat()
+                            }
+                        }
+
+                return jsonify(flash_message)
                 # This is a word submission
                 english_word = request.form['english_word']
                 user_input = request.form['user_input'].strip()
@@ -302,13 +488,23 @@ def deutsch_vocab():
                              (artikel_clean and user_clean == f"{correct_clean} {artikel_clean}"))
 
                 if is_correct:
-                    # Add to completed words (persisted per level)
                     word_key = (artikel, correct_deutsch, english_word)
-                    completed_list = progress_data.setdefault(level, [])
-                    if word_key not in completed_list:
-                        completed_list.append(word_key)
-                        # persist change
-                        save_progress()
+                    
+                    # Check if this word was initially wrong (in missed_words)
+                    was_initially_wrong = word_key in missed_words
+                    
+                    if was_initially_wrong:
+                        # Remove from missed_words but DON'T count as completed yet
+                        # This is just a retry success, not true mastery
+                        missed_words.remove(word_key)
+                    else:
+                        # This word was answered correctly on first try
+                        # Add to completed words (persisted per level)
+                        completed_list = progress_data.setdefault(level, [])
+                        if word_key not in completed_list:
+                            completed_list.append(word_key)
+                            # persist change
+                            save_progress()
 
                     if is_retry:
                         flash_message = {
@@ -337,6 +533,11 @@ def deutsch_vocab():
                             }
                         }
                 else:
+                    # ANY incorrect answer (first attempt OR retry) adds word to missed_words
+                    word_key = (artikel, correct_deutsch, english_word)
+                    if word_key not in missed_words:
+                        missed_words.append(word_key)
+                    
                     if is_retry:
                         # If it's a retry and still wrong, show error with correction option
                         flash_message = {
@@ -356,9 +557,8 @@ def deutsch_vocab():
                                 'timestamp': datetime.now().isoformat()
                             }
                         }
-                        missed_words.append((artikel, correct_deutsch, english_word))
                     else:
-                        # First attempt wrong - show correct answer with correction option
+                        # First attempt wrong - add to mistakes and show correct answer
                         flash_message = {
                             'type': 'retry_with_correction', 
                             'message': 'Incorrect. The database says "{} {}". Please type it now, or suggest a correction if you think it\'s wrong:'.format(artikel, correct_deutsch),
@@ -378,75 +578,48 @@ def deutsch_vocab():
 
                 return jsonify(flash_message)
 
-        # Initialize word queue for this level if empty
-        if not current_word_queue:
-            word_set = list(zip(level_vocab['Artikel'], level_vocab['Deutsch'], level_vocab['English']))
-            random.shuffle(word_set)
-            current_word_queue = word_set.copy()
-
-        # Check if we've completed all words for this level
-        total_words_for_level = len(list(zip(level_vocab['Artikel'], level_vocab['Deutsch'], level_vocab['English'])))
-        completed_for_level = len(progress_data.get(level, []))
-        if completed_for_level >= total_words_for_level and not missed_words:
-            # All words completed!
+        # NEW TUPLE-STATE LOGIC: Get words that need practice
+        words_to_practice = get_words_to_practice(level)
+        
+        # Check completion
+        stats = get_completion_stats(level)
+        if stats['completed']:
+            # All words mastered!
             return render_template('Deutsch_Vocab_html.html', 
                                  completed=True, 
                                  level=level, 
-                                 total_words=total_words_for_level,
+                                 total_words=stats['total'],
                                  level_options=level_options)
-
-        # Get next word (prioritize missed words, but add them to end of queue)
-        if missed_words:
-            artikel, deutsch_word, english_word = missed_words.pop(0)
-        else:
-            if not current_word_queue:
-                # Check completion again before refilling
-                if len(progress_data.get(level, [])) >= total_words_for_level:
-                    return render_template('Deutsch_Vocab_html.html', 
-                                         completed=True, 
-                                         level=level, 
-                                         total_words=total_words_for_level,
-                                         level_options=level_options)
-                
-                # Still have uncompleted words, refill queue with only uncompleted ones
-                all_words = list(zip(level_vocab['Artikel'], level_vocab['Deutsch'], level_vocab['English']))
-                completed_set = set(progress_data.get(level, []))
-                uncompleted_words = [word for word in all_words if word not in completed_set]
-                
-                if not uncompleted_words:
-                    # Shouldn't happen, but safety check
-                    return render_template('Deutsch_Vocab_html.html', 
-                                         completed=True, 
-                                         level=level, 
-                                         total_words=total_words_for_level,
-                                         level_options=level_options)
-                
-                random.shuffle(uncompleted_words)
-                current_word_queue = uncompleted_words.copy()
-            
-            if not current_word_queue:
-                return render_template('Deutsch_Vocab_html.html', error="No words available for the selected level.", level_options=level_options)
-            
-            artikel, deutsch_word, english_word = current_word_queue.pop(0)
+        
+        # Select a random word from words that need practice
+        if not words_to_practice:
+            return render_template('Deutsch_Vocab_html.html', 
+                                 error="No words available for practice.", 
+                                 level_options=level_options)
+        
+        # Pick a random word to practice
+        selected_word = random.choice(words_to_practice)
+        artikel = selected_word['artikel']
+        deutsch_word = selected_word['deutsch'] 
+        english_word = selected_word['english']
 
         # Don't display 'nan' if Artikel is blank
-        artikel_display = artikel if pd.notna(artikel) else ''
+        artikel_display = artikel if artikel else ''
 
-        # Get total words for current level for progress display
-        total_words_for_level = len(level_vocab)
-        completed_words_for_level = len(progress_data.get(level, []))
-
+        # Get stats for progress display
         return render_template('Deutsch_Vocab_html.html', 
                              english_word=english_word, 
                              correct_deutsch=deutsch_word, 
                              artikel=artikel_display, 
                              level=level, 
                              level_options=level_options,
-                             total_words=total_words_for_level,
-                             completed_words=completed_words_for_level)
+                             total_words=stats['total'],
+                             completed_words=stats['correct'])
 
     except Exception as e:
-        return render_template('Deutsch_Vocab_html.html', error="Error occurred: " + str(e), level_options=level_options)
+        return render_template('Deutsch_Vocab_html.html', 
+                             error="Error occurred: " + str(e), 
+                             level_options=level_options)
 
 
 @Deutsch_Vocab_blueprint.route('/vocab/<level>/progress', methods=['GET'])
@@ -461,19 +634,16 @@ def get_level_progress(level):
         if level_vocab.empty:
             return jsonify({'status': 'error', 'message': 'Level not found'})
         
-        # Calculate totals
-        total_words = len(level_vocab)
-
-        # Completed words are stored per level in progress_data
-        completed_for_level = len(progress_data.get(level, []))
+        # Get completion stats using new system
+        stats = get_completion_stats(level)
         
         return jsonify({
             'status': 'success',
             'level': level,
-            'total_words': total_words,
-            'completed_words': completed_for_level,
-            'remaining_words': total_words - completed_for_level,
-            'completion_percentage': round((completed_for_level / total_words) * 100, 1) if total_words > 0 else 0
+            'total_words': stats['total'],
+            'completed_words': stats['correct'],
+            'remaining_words': stats['not_answered'] + stats['incorrect'],
+            'completion_percentage': round((stats['correct'] / stats['total']) * 100, 1) if stats['total'] > 0 else 0
         })
         
     except Exception as e:
@@ -484,34 +654,19 @@ def get_level_progress(level):
 def reset_level_progress(level):
     """Reset progress for a specific level"""
     try:
-        global progress_data, current_word_queue, missed_words
-        
-        # Filter vocabulary for the specific level to get word tuples
-        level_vocab = vocab_df[vocab_df['Level'] == level]
-        
-        if level_vocab.empty:
-            return jsonify({'status': 'error', 'message': 'Level not found'})
-        
-        # Create set of word tuples for this level
-        level_word_tuples = set(zip(
-            level_vocab['Artikel'].fillna(''), 
-            level_vocab['Deutsch'], 
-            level_vocab['English']
-        ))
-        
-        # Remove completed words for this level only (persisted)
+        # Reset progress for this level by reinitializing
         if level in progress_data:
-            progress_data.pop(level, None)
+            # Reset all words for this level to 'notyetanswered'
+            for word in progress_data[level]:
+                word['status'] = 'notyetanswered'
             save_progress()
-
-        # Clear current queues (they'll be regenerated when needed)
-        current_word_queue = []
-        missed_words = []
+        else:
+            # Initialize the level if it doesn't exist
+            initialize_missing_levels()
         
         return jsonify({
             'status': 'success',
-            'message': f'Progress reset for level {level}',
-            'level': level
+            'message': f'Progress for level {level} has been reset'
         })
         
     except Exception as e:
@@ -522,14 +677,11 @@ def reset_level_progress(level):
 def reset_all_progress():
     """Reset all progress"""
     try:
-        global progress_data, current_word_queue, missed_words
-
-        # Reset all progress tracking (persisted)
+        # Reset all progress by reinitializing everything
+        global progress_data
         progress_data = {}
+        initialize_missing_levels()
         save_progress()
-
-        current_word_queue = []
-        missed_words = []
         
         return jsonify({
             'status': 'success',
@@ -538,3 +690,6 @@ def reset_all_progress():
         
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)})
+
+# Initialize progress on startup
+load_progress()
