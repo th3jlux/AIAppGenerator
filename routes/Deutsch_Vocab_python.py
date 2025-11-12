@@ -3,6 +3,7 @@ import pandas as pd
 import random
 from datetime import datetime
 import os
+import json
 
 Deutsch_Vocab_blueprint = Blueprint('Deutsch_Vocab_blueprint', __name__)
 
@@ -16,11 +17,43 @@ except Exception as e:
 # Global variables
 missed_words = []
 current_word_queue = []
-completed_words = []  # Track words that have been completed successfully
+# progress_data stores completed words per level: { "A1.1": [[artikel, deutsch, english], ...], ... }
+progress_data = {}
 current_level = None  # Track current level to reset queues on level change
+
+# Progress file on disk
+PROGRESS_FILE = 'data/progress.json'
+
+def load_progress():
+    global progress_data
+    try:
+        if os.path.exists(PROGRESS_FILE):
+            with open(PROGRESS_FILE, 'r', encoding='utf-8') as f:
+                progress_data = json.load(f)
+                # Convert keys to str and ensure lists of tuples
+                for lvl, items in list(progress_data.items()):
+                    # store as list of tuples for internal comparison
+                    progress_data[lvl] = [tuple(i) for i in items]
+        else:
+            progress_data = {}
+    except Exception as e:
+        print('Error loading progress file:', e)
+        progress_data = {}
+
+def save_progress():
+    try:
+        # Convert tuples to lists for JSON serialization
+        serializable = {lvl: [list(t) for t in items] for lvl, items in progress_data.items()}
+        with open(PROGRESS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(serializable, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print('Error saving progress file:', e)
 
 # Get distinct levels for filtering
 level_options = vocab_df['Level'].dropna().unique()
+
+# Load progress on startup
+load_progress()
 
 def update_vocab_csv(english_word, old_german, old_artikel, new_german, new_english, new_artikel, level):
     """Update the vocab.csv file with corrected values"""
@@ -155,7 +188,7 @@ def update_vocab_csv(english_word, old_german, old_artikel, new_german, new_engl
 
 @Deutsch_Vocab_blueprint.route('/Deutsch_Vocab_html', methods=['GET', 'POST'])
 def deutsch_vocab():
-    global missed_words, current_word_queue, completed_words, current_level
+    global missed_words, current_word_queue, progress_data, current_level
     
     try:
         # Get level from form (POST) or query params (GET), default to A1.1
@@ -164,9 +197,9 @@ def deutsch_vocab():
         # Check if level has changed, and reset queues if so
         if current_level != level:
             print(f"Level changed from {current_level} to {level}, resetting queues")
+            # Reset only the in-memory queues for the UI; keep persisted progress_data by level
             missed_words = []
             current_word_queue = []
-            completed_words = []
             current_level = level
         
         # Filter the dataframe based on the level
@@ -269,11 +302,14 @@ def deutsch_vocab():
                              (artikel_clean and user_clean == f"{correct_clean} {artikel_clean}"))
 
                 if is_correct:
-                    # Add to completed words
+                    # Add to completed words (persisted per level)
                     word_key = (artikel, correct_deutsch, english_word)
-                    if word_key not in completed_words:
-                        completed_words.append(word_key)
-                    
+                    completed_list = progress_data.setdefault(level, [])
+                    if word_key not in completed_list:
+                        completed_list.append(word_key)
+                        # persist change
+                        save_progress()
+
                     if is_retry:
                         flash_message = {
                             'type': 'success', 
@@ -350,7 +386,8 @@ def deutsch_vocab():
 
         # Check if we've completed all words for this level
         total_words_for_level = len(list(zip(level_vocab['Artikel'], level_vocab['Deutsch'], level_vocab['English'])))
-        if len(completed_words) >= total_words_for_level and not missed_words:
+        completed_for_level = len(progress_data.get(level, []))
+        if completed_for_level >= total_words_for_level and not missed_words:
             # All words completed!
             return render_template('Deutsch_Vocab_html.html', 
                                  completed=True, 
@@ -364,7 +401,7 @@ def deutsch_vocab():
         else:
             if not current_word_queue:
                 # Check completion again before refilling
-                if len(completed_words) >= total_words_for_level:
+                if len(progress_data.get(level, [])) >= total_words_for_level:
                     return render_template('Deutsch_Vocab_html.html', 
                                          completed=True, 
                                          level=level, 
@@ -373,7 +410,8 @@ def deutsch_vocab():
                 
                 # Still have uncompleted words, refill queue with only uncompleted ones
                 all_words = list(zip(level_vocab['Artikel'], level_vocab['Deutsch'], level_vocab['English']))
-                uncompleted_words = [word for word in all_words if word not in completed_words]
+                completed_set = set(progress_data.get(level, []))
+                uncompleted_words = [word for word in all_words if word not in completed_set]
                 
                 if not uncompleted_words:
                     # Shouldn't happen, but safety check
@@ -396,7 +434,7 @@ def deutsch_vocab():
 
         # Get total words for current level for progress display
         total_words_for_level = len(level_vocab)
-        completed_words_for_level = len(completed_words)
+        completed_words_for_level = len(progress_data.get(level, []))
 
         return render_template('Deutsch_Vocab_html.html', 
                              english_word=english_word, 
@@ -415,7 +453,7 @@ def deutsch_vocab():
 def get_level_progress(level):
     """Get progress information for a specific level"""
     try:
-        global vocab_df, completed_words
+        global vocab_df, progress_data
         
         # Filter vocabulary for the specific level
         level_vocab = vocab_df[vocab_df['Level'] == level]
@@ -425,16 +463,9 @@ def get_level_progress(level):
         
         # Calculate totals
         total_words = len(level_vocab)
-        completed_words_count = len(completed_words)
-        
-        # Filter completed words to only those that belong to current level
-        level_word_tuples = set(zip(
-            level_vocab['Artikel'].fillna(''), 
-            level_vocab['Deutsch'], 
-            level_vocab['English']
-        ))
-        
-        completed_for_level = len([word for word in completed_words if word in level_word_tuples])
+
+        # Completed words are stored per level in progress_data
+        completed_for_level = len(progress_data.get(level, []))
         
         return jsonify({
             'status': 'success',
@@ -453,7 +484,7 @@ def get_level_progress(level):
 def reset_level_progress(level):
     """Reset progress for a specific level"""
     try:
-        global completed_words, current_word_queue, missed_words
+        global progress_data, current_word_queue, missed_words
         
         # Filter vocabulary for the specific level to get word tuples
         level_vocab = vocab_df[vocab_df['Level'] == level]
@@ -468,9 +499,11 @@ def reset_level_progress(level):
             level_vocab['English']
         ))
         
-        # Remove completed words for this level only
-        completed_words = [word for word in completed_words if word not in level_word_tuples]
-        
+        # Remove completed words for this level only (persisted)
+        if level in progress_data:
+            progress_data.pop(level, None)
+            save_progress()
+
         # Clear current queues (they'll be regenerated when needed)
         current_word_queue = []
         missed_words = []
@@ -489,10 +522,12 @@ def reset_level_progress(level):
 def reset_all_progress():
     """Reset all progress"""
     try:
-        global completed_words, current_word_queue, missed_words
-        
-        # Reset all progress tracking
-        completed_words = []
+        global progress_data, current_word_queue, missed_words
+
+        # Reset all progress tracking (persisted)
+        progress_data = {}
+        save_progress()
+
         current_word_queue = []
         missed_words = []
         
