@@ -43,7 +43,8 @@ def load_progress():
         initialize_missing_levels()
 
 def initialize_missing_levels():
-    """Initialize progress for any levels not in progress_data"""
+    """Initialize progress for any levels not in progress_data and convert old format to new"""
+    updated = False
     for level in level_options:
         if level not in progress_data:
             progress_data[level] = []
@@ -61,6 +62,28 @@ def initialize_missing_levels():
                     'status': 'notyetanswered'
                 }
                 progress_data[level].append(word_entry)
+            updated = True
+        elif level in progress_data and len(progress_data[level]) > 0:
+            # Check if this level uses old format (list of lists) and convert to new format
+            first_item = progress_data[level][0]
+            if isinstance(first_item, list):
+                # Convert old format to new format
+                old_format = progress_data[level]
+                progress_data[level] = []
+                
+                for item in old_format:
+                    if len(item) >= 3:  # [artikel, deutsch, english]
+                        word_entry = {
+                            'artikel': item[0] if item[0] else '',
+                            'deutsch': item[1],
+                            'english': item[2],
+                            'status': 'notyetanswered'
+                        }
+                        progress_data[level].append(word_entry)
+                updated = True
+    
+    if updated:
+        save_progress()
 
 def save_progress():
     """Save progress to disk"""
