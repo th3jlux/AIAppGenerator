@@ -49,7 +49,7 @@
         }
         .primary-assets {
             display: grid;
-            grid-template-columns: 2fr 1fr;
+            grid-template-columns: 1fr 2fr;
             gap: 24px;
             margin-bottom: 30px;
         }
@@ -293,6 +293,48 @@
 
         <!-- Primary Assets Section -->
         <div class="primary-assets">
+            <!-- Net Worth Summary -->
+            <div class="category-section" style="background: linear-gradient(135deg, #6c7b8a 0%, #8a9ba8 100%); color: white;">
+                <div class="category-header" style="background: rgba(255,255,255,0.1); color: white; border-bottom: 1px solid rgba(255,255,255,0.2);">
+                    <span><span class="category-icon">💎</span>Net Worth</span>
+                </div>
+                <div style="padding: 25px; text-align: center;">
+                    <div style="font-size: 2.8em; font-weight: 300; margin-bottom: 15px;">
+                        {{ get_currency_symbol(currency) }}{{ format_currency_value(totals.grand_total, currency) }}
+                    </div>
+                    <div style="display: grid; gap: 12px; font-size: 0.95em; opacity: 0.9;">
+                        <div style="display: flex; justify-content: space-between;">
+                            <span>💼 Investments:</span>
+                            <span>{{ get_currency_symbol(currency) }}{{ format_currency_value(totals.stocks + totals.cryptos, currency) }}</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between;">
+                            <span>🏠 Real Estate:</span>
+                            <span>{{ get_currency_symbol(currency) }}{{ format_currency_value(totals.real_estate, currency) }}</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between;">
+                            <span>💳 Savings:</span>
+                            <span>{{ get_currency_symbol(currency) }}{{ format_currency_value(totals.savings, currency) }}</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between;">
+                            <span>📉 Loans:</span>
+                            <span>{{ get_currency_symbol(currency) }}{{ format_currency_value(totals.loans, currency) }}</span>
+                        </div>
+                    </div>
+                </div>
+
+
+                <!-- Currency Selection -->
+                <div class="currency-selector">
+                    <label for="currencySelect">Display Currency: </label>
+                    <select id="currencySelect" onchange="changeCurrency()">
+                        <option value="USD" {{ 'selected' if currency == 'USD' else '' }}>USD</option>
+                        <option value="EUR" {{ 'selected' if currency == 'EUR' else '' }}>EUR</option>
+                        <option value="INR" {{ 'selected' if currency == 'INR' else '' }}>INR</option>
+                        <option value="TRY" {{ 'selected' if currency == 'TRY' else '' }}>TRY</option>
+                    </select>
+                    <button id="refreshButton" class="btn" style="margin-left: 15px;">Refresh Prices</button>
+                </div>
+            </div>
             <!-- Real Estate Section -->
             <div class="category-section">
                 <div class="category-header">
@@ -346,35 +388,7 @@
                 </div>
             </div>
 
-            <!-- Net Worth Summary -->
-            <div class="category-section" style="background: linear-gradient(135deg, #6c7b8a 0%, #8a9ba8 100%); color: white;">
-                <div class="category-header" style="background: rgba(255,255,255,0.1); color: white; border-bottom: 1px solid rgba(255,255,255,0.2);">
-                    <span><span class="category-icon">💎</span>Net Worth</span>
-                </div>
-                <div style="padding: 25px; text-align: center;">
-                    <div style="font-size: 2.8em; font-weight: 300; margin-bottom: 15px;">
-                        {{ get_currency_symbol(currency) }}{{ format_currency_value(totals.grand_total, currency) }}
-                    </div>
-                    <div style="display: grid; gap: 12px; font-size: 0.95em; opacity: 0.9;">
-                        <div style="display: flex; justify-content: space-between;">
-                            <span>💼 Investments:</span>
-                            <span>{{ get_currency_symbol(currency) }}{{ format_currency_value(totals.stocks + totals.cryptos, currency) }}</span>
-                        </div>
-                        <div style="display: flex; justify-content: space-between;">
-                            <span>🏠 Real Estate:</span>
-                            <span>{{ get_currency_symbol(currency) }}{{ format_currency_value(totals.real_estate, currency) }}</span>
-                        </div>
-                        <div style="display: flex; justify-content: space-between;">
-                            <span>💳 Savings:</span>
-                            <span>{{ get_currency_symbol(currency) }}{{ format_currency_value(totals.savings, currency) }}</span>
-                        </div>
-                        <div style="display: flex; justify-content: space-between;">
-                            <span>📉 Loans:</span>
-                            <span>{{ get_currency_symbol(currency) }}{{ format_currency_value(totals.loans, currency) }}</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
+            
         </div>
 
         <!-- Investments Section -->
@@ -561,18 +575,6 @@
                     {% endif %}
                 </div>
             </div>
-        </div>
-
-        <!-- Currency Selection -->
-        <div class="currency-selector">
-            <label for="currencySelect">Display Currency: </label>
-            <select id="currencySelect" onchange="changeCurrency()">
-                <option value="USD" {{ 'selected' if currency == 'USD' else '' }}>USD</option>
-                <option value="EUR" {{ 'selected' if currency == 'EUR' else '' }}>EUR</option>
-                <option value="INR" {{ 'selected' if currency == 'INR' else '' }}>INR</option>
-                <option value="TRY" {{ 'selected' if currency == 'TRY' else '' }}>TRY</option>
-            </select>
-            <button id="refreshButton" class="btn" style="margin-left: 15px;">Refresh Prices</button>
         </div>
 
         <!-- Add New Entries Section -->
