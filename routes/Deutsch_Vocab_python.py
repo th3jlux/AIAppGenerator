@@ -93,8 +93,13 @@ def save_progress():
     except Exception as e:
         print('Error saving progress file:', e)
 
-def get_words_to_practice(level):
-    """Get words that need practice (status: notyetanswered or incorrect)"""
+def get_words_to_practice(level, difficult_only=False):
+    """Get words that need practice (status: notyetanswered or incorrect)
+    
+    Args:
+        level: The vocabulary level
+        difficult_only: If True, only return words marked as difficult
+    """
     if level not in progress_data:
         initialize_missing_levels()
     
@@ -102,6 +107,13 @@ def get_words_to_practice(level):
         word for word in progress_data[level] 
         if word['status'] in ['notyetanswered', 'incorrect']
     ]
+    
+    if difficult_only:
+        words_to_practice = [
+            word for word in words_to_practice
+            if word.get('difficulty') == 'hard'
+        ]
+    
     return words_to_practice
 
 def update_word_status(level, artikel, deutsch, english, new_status):
@@ -116,6 +128,50 @@ def update_word_status(level, artikel, deutsch, english, new_status):
             word['status'] = new_status
             save_progress()
             return True
+    return False
+
+def mark_word_difficulty(level, artikel, deutsch, english, is_difficult):
+    """Mark a word as difficult or easy"""
+    if level not in progress_data:
+        initialize_missing_levels()
+    
+    for word in progress_data[level]:
+        if (word['artikel'] == artikel and 
+            word['deutsch'] == deutsch and 
+            word['english'] == english):
+            if is_difficult:
+                word['difficulty'] = 'hard'
+            else:
+                # Remove difficulty field if marking as easy
+                word.pop('difficulty', None)
+            save_progress()
+            return True
+    return False
+
+def sync_progress_with_vocab_change(level, old_english, old_german, old_artikel, new_english, new_german, new_artikel):
+    """Sync progress.json when vocab.csv changes for a specific word"""
+    if level not in progress_data:
+        return False
+    
+    # Find the word in progress data using old values
+    for word in progress_data[level]:
+        if (word['artikel'] == old_artikel and 
+            word['deutsch'] == old_german and 
+            word['english'] == old_english):
+            
+            # Update the word with new values (preserve status and difficulty)
+            if new_english:
+                word['english'] = new_english
+            if new_german:
+                word['deutsch'] = new_german
+            if new_artikel is not None:  # Allow empty string to remove artikel
+                word['artikel'] = new_artikel
+                
+            print(f"Synced progress entry: {old_english}/{old_german}/{old_artikel} -> {word['english']}/{word['deutsch']}/{word['artikel']}")
+            save_progress()
+            return True
+    
+    print(f"No progress entry found to sync for: {old_english}/{old_german}/{old_artikel}")
     return False
 
 def get_completion_stats(level):
@@ -238,6 +294,21 @@ def update_vocab_csv(english_word, old_german, old_artikel, new_german, new_engl
             global level_options
             level_options = vocab_df['Level'].dropna().unique()
             
+            # Sync the progress.json with the vocabulary changes
+            sync_success = sync_progress_with_vocab_change(
+                level=level,
+                old_english=english_word,
+                old_german=old_german, 
+                old_artikel=old_artikel,
+                new_english=new_english,
+                new_german=new_german,
+                new_artikel=new_artikel
+            )
+            if sync_success:
+                print(f"Progress data synced successfully")
+            else:
+                print(f"Warning: Could not sync progress data for this word")
+            
             print(f"Successfully updated vocab entry")
             return True
         else:
@@ -279,6 +350,12 @@ def deutsch_vocab():
         # Get level from form (POST) or query params (GET), default to A1.1
         level = request.form.get('level') or request.args.get('level', 'A1.1')
         
+        # Get toggle states from form or query params
+        difficult_only = (request.form.get('difficult_only', 'false').lower() == 'true' or 
+                         request.args.get('difficult_only', 'false') == 'true')
+        articles_mandatory = (request.form.get('articles_mandatory', 'false').lower() == 'true' or
+                            request.args.get('articles_mandatory', 'false') == 'true')
+        
         # Ensure progress is initialized for this level
         if level not in progress_data:
             initialize_missing_levels()
@@ -294,6 +371,12 @@ def deutsch_vocab():
                 correct_deutsch = request.form['correct_deutsch'].strip()
                 artikel = request.form['artikel'].strip()
                 is_retry = request.form.get('is_retry', 'false') == 'true'
+                
+                # Handle pre-marked difficulty if present
+                pre_difficulty = request.form.get('pre_difficulty')
+                if pre_difficulty is not None:
+                    is_difficult = pre_difficulty.lower() == 'true'
+                    mark_word_difficulty(level, artikel, correct_deutsch, english_word, is_difficult)
 
                 # Check if this is a correction submission
                 is_correction = request.form.get('is_correction', 'false') == 'true'
@@ -353,10 +436,19 @@ def deutsch_vocab():
                 artikel_clean = artikel.lower().strip() if artikel else ''
                 correct_with_artikel = f"{artikel_clean} {correct_clean}".strip()
                 
+                # Check if articles are mandatory
+                articles_mandatory = request.form.get('articles_mandatory', 'false') == 'true'
+                
                 # Check if answer is correct
-                is_correct = (user_clean == correct_clean or 
-                             user_clean == correct_with_artikel or
-                             (artikel_clean and user_clean == f"{correct_clean} {artikel_clean}"))
+                if articles_mandatory and artikel_clean:
+                    # When articles are mandatory and word has article, require article
+                    is_correct = (user_clean == correct_with_artikel or
+                                user_clean == f"{correct_clean} {artikel_clean}")
+                else:
+                    # Normal mode: accept with or without article
+                    is_correct = (user_clean == correct_clean or 
+                                 user_clean == correct_with_artikel or
+                                 (artikel_clean and user_clean == f"{correct_clean} {artikel_clean}"))
 
                 if is_correct:
                     # Update word status to 'correct' (only if not practice retry)
@@ -422,187 +514,31 @@ def deutsch_vocab():
                         }
 
                 return jsonify(flash_message)
-                # This is a word submission
-                english_word = request.form['english_word']
-                user_input = request.form['user_input'].strip()
-                correct_deutsch = request.form['correct_deutsch'].strip()
-                artikel = request.form['artikel'].strip()
-                is_retry = request.form.get('is_retry', 'false') == 'true'
-
-                # Debug: Print all form data for correction submissions
-                if request.form.get('is_correction', 'false') == 'true':
-                    print("=== CORRECTION FORM DATA ===")
-                    for key, value in request.form.items():
-                        print(f"{key}: '{value}'")
-                    print("============================")
-
-                # Clean user input and correct answer for comparison
-                user_clean = user_input.lower().strip()
-                correct_clean = correct_deutsch.lower().strip()
+            # Handle difficulty marking
+            elif request.form.get('mark_difficulty'):
+                artikel = request.form.get('artikel', '').strip()
+                deutsch = request.form.get('deutsch', '').strip()
+                english = request.form.get('english', '').strip()
+                difficulty = request.form.get('difficulty') == 'true'
                 
-                # Check if this is a correction submission
-                is_correction = request.form.get('is_correction', 'false') == 'true'
-                corrected_german = request.form.get('corrected_german', '').strip()
-                corrected_english = request.form.get('corrected_english', '').strip()
-                corrected_artikel = request.form.get('corrected_artikel', '').strip()
-                
-                if is_correction and (corrected_german or corrected_english or corrected_artikel):
-                    # Handle full correction submission
-                    correction_details = {
-                        'original': {
-                            'german': correct_deutsch,
-                            'english': english_word,
-                            'artikel': artikel
-                        },
-                        'corrected': {
-                            'german': corrected_german or correct_deutsch,
-                            'english': corrected_english or english_word,
-                            'artikel': corrected_artikel if corrected_artikel else artikel
-                        }
-                    }
-                    
-                    # Update the CSV file with corrections
-                    update_success = update_vocab_csv(
-                        english_word=english_word,
-                        old_german=correct_deutsch,
-                        old_artikel=artikel,
-                        new_german=corrected_german,
-                        new_english=corrected_english,
-                        new_artikel=corrected_artikel,
-                        level=level
-                    )
-                    
-                    if update_success:
-                        message = 'Thank you! Your corrections have been saved to the database: {}'.format(
-                            ', '.join([f"{k}: '{correction_details['corrected'][k]}'" for k in correction_details['corrected'] 
-                                     if correction_details['corrected'][k] != correction_details['original'][k]])
-                        )
-                    else:
-                        message = 'Your correction was noted but there was an issue updating the file. Changes: {}'.format(
-                            ', '.join([f"{k}: '{correction_details['corrected'][k]}'" for k in correction_details['corrected'] 
-                                     if correction_details['corrected'][k] != correction_details['original'][k]])
-                        )
-                    
-                    flash_message = {
-                        'type': 'correction_submitted', 
-                        'message': message,
-                        'metrics': {
-                            'correct': True,  # Count corrections as correct for metrics
-                            'retry': False,
-                            'correction': True,
-                            'word': correct_deutsch,
-                            'english': english_word,
-                            'artikel': artikel,
-                            'correction_details': correction_details,
-                            'corrected_values': correction_details['corrected'],  # Easy access for frontend
-                            'update_success': update_success,
-                            'timestamp': datetime.now().isoformat()
-                        }
-                    }
-                    return jsonify(flash_message)
-                
-                # Allow artikel to be optionally included in the answer
-                artikel_clean = artikel.lower().strip() if artikel else ''
-                correct_with_artikel = f"{artikel_clean} {correct_clean}".strip()
-                
-                # Check if answer is correct (with or without artikel)
-                is_correct = (user_clean == correct_clean or 
-                             user_clean == correct_with_artikel or
-                             (artikel_clean and user_clean == f"{correct_clean} {artikel_clean}"))
-
-                if is_correct:
-                    word_key = (artikel, correct_deutsch, english_word)
-                    
-                    # Check if this word was initially wrong (in missed_words)
-                    was_initially_wrong = word_key in missed_words
-                    
-                    if was_initially_wrong:
-                        # Remove from missed_words but DON'T count as completed yet
-                        # This is just a retry success, not true mastery
-                        missed_words.remove(word_key)
-                    else:
-                        # This word was answered correctly on first try
-                        # Add to completed words (persisted per level)
-                        completed_list = progress_data.setdefault(level, [])
-                        if word_key not in completed_list:
-                            completed_list.append(word_key)
-                            # persist change
-                            save_progress()
-
-                    if is_retry:
-                        flash_message = {
-                            'type': 'success', 
-                            'message': 'Great! You got it right this time. "{}" is {} {}.'.format(english_word, artikel, correct_deutsch),
-                            'metrics': {
-                                'correct': True,
-                                'retry': True,
-                                'word': correct_deutsch,
-                                'english': english_word,
-                                'artikel': artikel,
-                                'timestamp': datetime.now().isoformat()
-                            }
-                        }
-                    else:
-                        flash_message = {
-                            'type': 'success', 
-                            'message': 'Correct! The word "{}" is {} {}.'.format(english_word, artikel, correct_deutsch),
-                            'metrics': {
-                                'correct': True,
-                                'retry': False,
-                                'word': correct_deutsch,
-                                'english': english_word,
-                                'artikel': artikel,
-                                'timestamp': datetime.now().isoformat()
-                            }
-                        }
+                success = mark_word_difficulty(level, artikel, deutsch, english, difficulty)
+                if success:
+                    status = 'difficult' if difficulty else 'normal'
+                    return jsonify({
+                        'type': 'difficulty_updated',
+                        'message': f'Word marked as {status}',
+                        'difficulty': difficulty
+                    })
                 else:
-                    # ANY incorrect answer (first attempt OR retry) adds word to missed_words
-                    word_key = (artikel, correct_deutsch, english_word)
-                    if word_key not in missed_words:
-                        missed_words.append(word_key)
-                    
-                    if is_retry:
-                        # If it's a retry and still wrong, show error with correction option
-                        flash_message = {
-                            'type': 'error_with_correction', 
-                            'message': 'Still incorrect. The database says "{} {}". If you think this is wrong, you can suggest a correction.'.format(artikel, correct_deutsch),
-                            'correct_answer': correct_deutsch,
-                            'artikel': artikel,
-                            'english_word': english_word,
-                            'user_answer': user_input,
-                            'metrics': {
-                                'correct': False,
-                                'retry': True,
-                                'word': correct_deutsch,
-                                'english': english_word,
-                                'artikel': artikel,
-                                'user_answer': user_input,
-                                'timestamp': datetime.now().isoformat()
-                            }
-                        }
-                    else:
-                        # First attempt wrong - add to mistakes and show correct answer
-                        flash_message = {
-                            'type': 'retry_with_correction', 
-                            'message': 'Incorrect. The database says "{} {}". Please type it now, or suggest a correction if you think it\'s wrong:'.format(artikel, correct_deutsch),
-                            'correct_answer': correct_deutsch,
-                            'artikel': artikel,
-                            'english_word': english_word,
-                            'metrics': {
-                                'correct': False,
-                                'retry': False,
-                                'word': correct_deutsch,
-                                'english': english_word,
-                                'artikel': artikel,
-                                'user_answer': user_input,
-                                'timestamp': datetime.now().isoformat()
-                            }
-                        }
-
-                return jsonify(flash_message)
+                    return jsonify({
+                        'type': 'error',
+                        'message': 'Failed to update difficulty'
+                    })
 
         # NEW TUPLE-STATE LOGIC: Get words that need practice
-        words_to_practice = get_words_to_practice(level)
+        # Check for difficulty filter in request
+        difficult_only = request.args.get('difficult_only', 'false') == 'true'
+        words_to_practice = get_words_to_practice(level, difficult_only)
         
         # Check completion
         stats = get_completion_stats(level)
@@ -612,13 +548,18 @@ def deutsch_vocab():
                                  completed=True, 
                                  level=level, 
                                  total_words=stats['total'],
-                                 level_options=level_options)
+                                 level_options=level_options,
+                                 difficult_only=difficult_only,
+                                 articles_mandatory=articles_mandatory)
         
         # Select a random word from words that need practice
         if not words_to_practice:
+            error_msg = "No difficult words available for practice." if difficult_only else "No words available for practice."
             return render_template('Deutsch_Vocab_html.html', 
-                                 error="No words available for practice.", 
-                                 level_options=level_options)
+                                 error=error_msg, 
+                                 level_options=level_options,
+                                 difficult_only=difficult_only,
+                                 articles_mandatory=articles_mandatory)
         
         # Pick a random word to practice
         selected_word = random.choice(words_to_practice)
@@ -637,12 +578,16 @@ def deutsch_vocab():
                              level=level, 
                              level_options=level_options,
                              total_words=stats['total'],
-                             completed_words=stats['correct'])
+                             completed_words=stats['correct'],
+                             difficult_only=difficult_only,
+                             articles_mandatory=articles_mandatory)
 
     except Exception as e:
         return render_template('Deutsch_Vocab_html.html', 
                              error="Error occurred: " + str(e), 
-                             level_options=level_options)
+                             level_options=level_options,
+                             difficult_only=difficult_only,
+                             articles_mandatory=articles_mandatory)
 
 
 @Deutsch_Vocab_blueprint.route('/vocab/<level>/progress', methods=['GET'])

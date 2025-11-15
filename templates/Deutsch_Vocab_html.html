@@ -685,6 +685,69 @@
             transform: translateY(-1px);
             box-shadow: 0 4px 12px rgba(255, 193, 7, 0.4);
         }
+
+        /* Difficulty marking styles */
+        .difficulty-controls {
+            text-align: center;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 10px;
+            border: 2px dashed #dee2e6;
+        }
+
+        .difficulty-buttons {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+        }
+
+        .difficulty-btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            min-width: 80px;
+        }
+
+        .easy-btn {
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+            color: white;
+            box-shadow: 0 2px 8px rgba(40, 167, 69, 0.3);
+        }
+
+        .easy-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(40, 167, 69, 0.4);
+        }
+
+        .hard-btn {
+            background: linear-gradient(135deg, #dc3545 0%, #fd7e14 100%);
+            color: white;
+            box-shadow: 0 2px 8px rgba(220, 53, 69, 0.3);
+        }
+
+        .hard-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(220, 53, 69, 0.4);
+        }
+
+        /* Feature controls styling */
+        .feature-controls {
+            background: #f8f9fa;
+            border-radius: 12px;
+            padding: 15px;
+        }
+
+        .control-item {
+            margin-bottom: 15px;
+        }
+
+        .control-item:last-child {
+            margin-bottom: 0;
+        }
         
         .card button {
             background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
@@ -999,7 +1062,11 @@
         
         function goToLevel(newLevel) {
             if (newLevel) {
-                window.location.href = '?level=' + encodeURIComponent(newLevel);
+                // Preserve all toggle states when changing level from completion screen
+                const audioParam = audioMode ? '&audio=true' : '';
+                const difficultParam = difficultOnlyMode ? '&difficult_only=true' : '';
+                const articlesParam = articlesMandatoryMode ? '&articles_mandatory=true' : '';
+                window.location.href = '?level=' + encodeURIComponent(newLevel) + audioParam + difficultParam + articlesParam;
             }
         }
     </script>
@@ -1038,8 +1105,22 @@
                         <input type="hidden" name="is_retry" value="false" id="retry-flag">
                         <input type="hidden" name="is_correction" value="false" id="correction-flag">
                         <input type="hidden" name="english_word" value="{{ english_word }}">
+                        <input type="hidden" name="articles_mandatory" value="{{ 'true' if articles_mandatory else 'false' }}">
                         
                         <input type="text" name="user_input" id="user-input" placeholder="Type the German translation..." autocomplete="off" autofocus>
+                        
+                        <!-- Difficulty marking controls (shown before submitting) -->
+                        <div class="difficulty-controls" id="pre-submit-difficulty" style="display: none; margin: 15px 0;">
+                            <p style="font-size: 14px; margin-bottom: 10px; color: #666;">Mark difficulty level for this word:</p>
+                            <div class="difficulty-buttons">
+                                <button type="button" class="difficulty-btn easy-btn" onclick="markPreDifficulty(false)">
+                                    😊 Easy
+                                </button>
+                                <button type="button" class="difficulty-btn hard-btn" onclick="markPreDifficulty(true)">
+                                    🔥 Difficult
+                                </button>
+                            </div>
+                        </div>
                         
                         <div class="umlaut-buttons">
                             <button type="button" class="umlaut-btn" onclick="insertUmlaut('ä')" title="Insert ä">ä</button>
@@ -1055,6 +1136,19 @@
                     <div class="submit-section">
                         <button type="submit">Submit</button>
                         <div class="message" id="response-message"></div>
+                        
+                        <!-- Difficulty marking buttons (shown after correct answers) -->
+                        <div class="difficulty-controls" id="difficulty-controls" style="display: none; margin-top: 15px;">
+                            <p style="font-size: 14px; margin-bottom: 10px; color: #666;">Was this word difficult?</p>
+                            <div class="difficulty-buttons">
+                                <button type="button" class="difficulty-btn easy-btn" onclick="markDifficulty(false)">
+                                    😊 Easy
+                                </button>
+                                <button type="button" class="difficulty-btn hard-btn" onclick="markDifficulty(true)">
+                                    🔥 Difficult
+                                </button>
+                            </div>
+                        </div>
                         <div class="correction-interface" id="correction-interface" style="display: none;">
                             <h4>�️ Edit Vocabulary Entry</h4>
                             
@@ -1123,6 +1217,27 @@
             <div id="audio-status" style="font-size: 12px; opacity: 0.8;">
                 Click to enable audio mode for speaking practice
             </div>
+
+            <div class="control-item">
+                <div class="mode-toggle">
+                    <span>🌟 All</span>
+                    <div class="toggle-switch" id="difficult-mode-toggle" onclick="toggleDifficultMode()">
+                        <div class="toggle-slider"></div>
+                    </div>
+                    <span>🔥 Difficult</span>
+                </div>
+            </div>
+            
+            <div class="control-item">
+                <div class="mode-toggle">
+                    <span>📝 No Articles</span>
+                    <div class="toggle-switch" id="articles-toggle" onclick="toggleArticlesMandatory()">
+                        <div class="toggle-slider"></div>
+                    </div>
+                    <span>⚡ Articles</span>
+                </div>
+            </div>
+
         </div>
         
         <div class="metric-card" style="background: linear-gradient(135deg, #28a745 0%, #20c997 100%);">
@@ -1167,6 +1282,10 @@
         let isListening = false;
         let englishVoice = null;
         let germanVoice = null;
+        
+        // Feature toggle variables (mimic audioMode behavior)
+        let difficultOnlyMode = false;
+        let articlesMandatoryMode = false;
         
         // Initialize speech recognition if available
         if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
@@ -1857,6 +1976,15 @@
         document.getElementById('vocab-form').onsubmit = function(event) {
             event.preventDefault();
             const formData = new FormData(event.target);
+            
+            // Add pre-marked difficulty if set
+            if (preMarkedDifficulty !== null) {
+                formData.append('pre_difficulty', preMarkedDifficulty);
+            }
+            
+            // Add toggle states
+            formData.append('difficult_only', difficultOnlyMode);
+            formData.append('articles_mandatory', articlesMandatoryMode);
 
             fetch("", {
                 method: 'POST',
@@ -1882,6 +2010,29 @@
                 if (data.type === 'success' || data.type === 'correction_submitted') {
                     // Hide correction interface
                     hideCorrectionInterface();
+                    
+                    // Hide pre-submit difficulty controls and reset state
+                    document.getElementById('pre-submit-difficulty').style.display = 'none';
+                    preMarkedDifficulty = null;
+                    
+                    // Reset difficulty button styles
+                    const easyBtn = document.querySelector('#pre-submit-difficulty .easy-btn');
+                    const hardBtn = document.querySelector('#pre-submit-difficulty .hard-btn');
+                    if (easyBtn) {
+                        easyBtn.style.backgroundColor = '';
+                        easyBtn.style.color = '';
+                    }
+                    if (hardBtn) {
+                        hardBtn.style.backgroundColor = '';
+                        hardBtn.style.color = '';
+                    }
+                    
+                    // Show difficulty controls for successful answers (not retries)
+                    if (data.type === 'success' && data.metrics && !data.metrics.retry) {
+                        setTimeout(() => {
+                            document.getElementById('difficulty-controls').style.display = 'block';
+                        }, 500);
+                    }
                     
                     // Audio feedback for correct answers
                     if (audioMode && data.type === 'success' && data.metrics && data.metrics.word) {
@@ -1929,10 +2080,12 @@
                                 if (field) field.remove();
                             });
                             
-                            // Reload with the same level
+                            // Reload with the same level and preserve all toggle states
                             const currentLevel = document.getElementById('level-select').value;
                             const audioParam = audioMode ? '&audio=true' : '';
-                            window.location.href = '?level=' + encodeURIComponent(currentLevel) + audioParam;
+                            const difficultParam = difficultOnlyMode ? '&difficult_only=true' : '';
+                            const articlesParam = articlesMandatoryMode ? '&articles_mandatory=true' : '';
+                            window.location.href = '?level=' + encodeURIComponent(currentLevel) + audioParam + difficultParam + articlesParam;
                         }, 300);
                     }, 1200); // Longer delay to show the update status
                 } else if (data.type === 'retry_with_correction') {
@@ -1967,8 +2120,11 @@
 
         document.getElementById('level-select').onchange = function() {
             const selectedLevel = this.value;
-            // Use GET request with query parameter to maintain level selection
-            window.location.href = '?level=' + encodeURIComponent(selectedLevel);
+            // Preserve all toggle states when changing level
+            const audioParam = audioMode ? '&audio=true' : '';
+            const difficultParam = difficultOnlyMode ? '&difficult_only=true' : '';
+            const articlesParam = articlesMandatoryMode ? '&articles_mandatory=true' : '';
+            window.location.href = '?level=' + encodeURIComponent(selectedLevel) + audioParam + difficultParam + articlesParam;
         }
 
         // Initialize performance tracking when page loads
@@ -2022,6 +2178,146 @@
                 document.getElementById('vocab-form').dispatchEvent(new Event('submit'));
             }
         });
+        
+        // Show difficulty controls when user starts typing
+        document.getElementById('user-input').addEventListener('input', function(event) {
+            showPreSubmitDifficulty();
+        });
+
+        // New functions for difficulty marking and toggles
+        
+        // Initialize toggle states from URL parameters
+        function initializeToggles() {
+            const urlParams = new URLSearchParams(window.location.search);
+            
+            // Initialize difficult mode toggle
+            const difficultModeToggle = document.getElementById('difficult-mode-toggle');
+            if (urlParams.get('difficult_only') === 'true') {
+                difficultModeToggle.classList.add('active');
+            }
+            
+            // Initialize articles mandatory toggle
+            const articlesToggle = document.getElementById('articles-toggle');
+            if (urlParams.get('articles_mandatory') === 'true') {
+                articlesToggle.classList.add('active');
+            }
+        }
+        
+        // Toggle difficult words only mode
+        function toggleDifficultMode() {
+            difficultOnlyMode = !difficultOnlyMode;
+            const toggle = document.getElementById('difficult-mode-toggle');
+            
+            if (difficultOnlyMode) {
+                toggle.classList.add('active');
+            } else {
+                toggle.classList.remove('active');
+            }
+            
+            console.log('Difficult only mode:', difficultOnlyMode ? 'enabled' : 'disabled');
+        }
+        
+        // Toggle articles mandatory mode
+        function toggleArticlesMandatory() {
+            articlesMandatoryMode = !articlesMandatoryMode;
+            const toggle = document.getElementById('articles-toggle');
+            
+            if (articlesMandatoryMode) {
+                toggle.classList.add('active');
+            } else {
+                toggle.classList.remove('active');
+            }
+            
+            // Update the hidden form field
+            const articlesField = document.querySelector('input[name="articles_mandatory"]');
+            if (articlesField) {
+                articlesField.value = articlesMandatoryMode ? 'true' : 'false';
+            }
+            
+            console.log('Articles mandatory mode:', articlesMandatoryMode ? 'enabled' : 'disabled');
+        }
+        
+        // Mark word difficulty before submission
+        let preMarkedDifficulty = null; // Store the difficulty marking
+        
+        function markPreDifficulty(isDifficult) {
+            preMarkedDifficulty = isDifficult;
+            
+            // Visual feedback
+            const easyBtn = document.querySelector('#pre-submit-difficulty .easy-btn');
+            const hardBtn = document.querySelector('#pre-submit-difficulty .hard-btn');
+            
+            if (isDifficult) {
+                hardBtn.style.backgroundColor = '#dc3545';
+                hardBtn.style.color = 'white';
+                easyBtn.style.backgroundColor = '';
+                easyBtn.style.color = '';
+            } else {
+                easyBtn.style.backgroundColor = '#28a745';
+                easyBtn.style.color = 'white';
+                hardBtn.style.backgroundColor = '';
+                hardBtn.style.color = '';
+            }
+            
+            console.log('Pre-marked difficulty:', isDifficult ? 'hard' : 'easy');
+        }
+        
+        // Show pre-submit difficulty controls after user starts typing
+        function showPreSubmitDifficulty() {
+            const userInput = document.getElementById('user-input');
+            const difficultyControls = document.getElementById('pre-submit-difficulty');
+            
+            if (userInput.value.trim().length > 0 && difficultyControls.style.display === 'none') {
+                difficultyControls.style.display = 'block';
+            }
+        }
+        
+        // Mark word difficulty (original function for post-submit, now unused)
+        function markDifficulty(isDifficult) {
+            const englishWord = document.querySelector('input[name="english_word"]').value;
+            const deutsch = document.querySelector('input[name="correct_deutsch"]').value;
+            const artikel = document.querySelector('input[name="artikel"]').value;
+            const level = document.querySelector('input[name="level"]').value;
+            
+            fetch('/Deutsch_Vocab_html', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: new URLSearchParams({
+                    'mark_difficulty': 'true',
+                    'english': englishWord,
+                    'deutsch': deutsch,
+                    'artikel': artikel,
+                    'difficulty': isDifficult,
+                    'level': level
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                console.log('Difficulty marked:', data);
+            })
+            .catch(error => {
+                console.error('Error marking difficulty:', error);
+            });
+        }
+        
+        // Initialize toggles on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            // Initialize toggle states from backend
+            {% if difficult_only %}
+            difficultOnlyMode = true;
+            document.getElementById('difficult-mode-toggle').classList.add('active');
+            {% endif %}
+            
+            {% if articles_mandatory %}
+            articlesMandatoryMode = true;
+            document.getElementById('articles-toggle').classList.add('active');
+            {% endif %}
+        });
+
+        // Store current word data for difficulty marking
+        let currentWordData = null;
     </script>
 </body>
 </html>
