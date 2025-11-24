@@ -11,7 +11,7 @@ My_Networth_blueprint = Blueprint('My_Networth_blueprint', __name__)
 # Path to the data file
 DATA_FILE = Path(__file__).parent.parent / 'data' / 'networth.json'
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 def get_currency_symbol(currency):
     """Map currency codes to their symbols"""
@@ -62,6 +62,10 @@ def load_portfolio():
         "investments": {
             "stocks": [],
             "cryptos": []
+        },
+        "recurring_transactions": {
+            "income": [],
+            "expenses": []
         }
     }
     
@@ -93,6 +97,167 @@ def get_next_id(category: str, existing_items: list) -> str:
         if new_id not in existing_ids:
             return new_id
         counter += 1
+
+def calculate_next_due_date(current_date_str: str, frequency: str) -> str:
+    """Calculate next due date based on frequency"""
+    current_date = datetime.strptime(current_date_str, "%Y-%m-%d")
+    
+    if frequency == "weekly":
+        next_date = current_date + timedelta(weeks=1)
+    elif frequency == "monthly":
+        # Add one month (approximate with 30 days, then adjust)
+        if current_date.month == 12:
+            next_date = current_date.replace(year=current_date.year + 1, month=1)
+        else:
+            try:
+                next_date = current_date.replace(month=current_date.month + 1)
+            except ValueError:
+                # Handle case where current day doesn't exist in next month (e.g., Jan 31 -> Feb 28)
+                next_date = current_date.replace(month=current_date.month + 1, day=28)
+    elif frequency == "quarterly":
+        # Add 3 months
+        month = current_date.month
+        year = current_date.year
+        month += 3
+        if month > 12:
+            year += month // 12
+            month = month % 12
+            if month == 0:
+                month = 12
+                year -= 1
+        try:
+            next_date = current_date.replace(year=year, month=month)
+        except ValueError:
+            # Handle day overflow (e.g., May 31 + 3 months = Aug 31, but some months don't have 31 days)
+            next_date = current_date.replace(year=year, month=month, day=28)
+    elif frequency == "yearly":
+        try:
+            next_date = current_date.replace(year=current_date.year + 1)
+        except ValueError:
+            # Handle leap year edge case (Feb 29)
+            next_date = current_date.replace(year=current_date.year + 1, day=28)
+    else:
+        raise ValueError(f"Unsupported frequency: {frequency}")
+    
+    return next_date.strftime("%Y-%m-%d")
+
+def is_transaction_due(due_date_str: str, last_processed_str: str = None) -> bool:
+    """Check if a recurring transaction is due for processing"""
+    today = datetime.now().date()
+    due_date = datetime.strptime(due_date_str, "%Y-%m-%d").date()
+    
+    # Transaction is due if due_date <= today
+    if due_date > today:
+        return False
+    
+    # If already processed today, don't process again
+    if last_processed_str:
+        try:
+            last_processed = datetime.strptime(last_processed_str, "%Y-%m-%d").date()
+            if last_processed == today:
+                return False
+        except (ValueError, TypeError):
+            pass
+    
+    return True
+
+def process_recurring_transactions(portfolio_data):
+    """Process all due recurring transactions and update account balances"""
+    recurring = portfolio_data.get('recurring_transactions', {'income': [], 'expenses': []})
+    
+    # Get currency conversion rates
+    try:
+        response = requests.get(CURRENCY_API_URL)
+        rates = response.json().get('rates', {})
+    except Exception:
+        rates = {}
+    
+    today = datetime.now().date().strftime("%Y-%m-%d")
+    transactions_processed = []
+    
+    # Process recurring income
+    for income in recurring.get('income', []):
+        if not income.get('is_active', True):
+            continue
+            
+        if is_transaction_due(income['next_due_date'], income.get('last_processed')):
+            # Find target account
+            target_account = None
+            for account in portfolio_data.get('savings', []):
+                if account['id'] == income['target_account_id']:
+                    target_account = account
+                    break
+            
+            if target_account:
+                # Convert income amount to account currency if needed
+                income_amount = income['amount']
+                if income['currency'] != target_account['currency']:
+                    # Convert income currency to USD first, then to account currency
+                    income_usd = income_amount / rates.get(income['currency'], 1) if income['currency'] != 'USD' else income_amount
+                    income_in_account_currency = income_usd * rates.get(target_account['currency'], 1)
+                else:
+                    income_in_account_currency = income_amount
+                
+                # Update account balance
+                target_account['balance'] += income_in_account_currency
+                target_account['balance_usd'] = target_account['balance'] / rates.get(target_account['currency'], 1) if target_account['currency'] != 'USD' else target_account['balance']
+                target_account['last_updated'] = datetime.now().isoformat() + "Z"
+                
+                # Update recurring income record
+                income['last_processed'] = today
+                income['next_due_date'] = calculate_next_due_date(income['next_due_date'], income['frequency'])
+                
+                transactions_processed.append({
+                    'type': 'income',
+                    'name': income['name'],
+                    'amount': income_amount,
+                    'currency': income['currency'],
+                    'account': target_account['name'],
+                    'date': today
+                })
+    
+    # Process recurring expenses
+    for expense in recurring.get('expenses', []):
+        if not expense.get('is_active', True):
+            continue
+            
+        if is_transaction_due(expense['next_due_date'], expense.get('last_processed')):
+            # Find source account
+            source_account = None
+            for account in portfolio_data.get('savings', []):
+                if account['id'] == expense['source_account_id']:
+                    source_account = account
+                    break
+            
+            if source_account:
+                # Convert expense amount to account currency if needed
+                expense_amount = expense['amount']
+                if expense['currency'] != source_account['currency']:
+                    # Convert expense currency to USD first, then to account currency
+                    expense_usd = expense_amount / rates.get(expense['currency'], 1) if expense['currency'] != 'USD' else expense_amount
+                    expense_in_account_currency = expense_usd * rates.get(source_account['currency'], 1)
+                else:
+                    expense_in_account_currency = expense_amount
+                
+                # Update account balance (subtract expense)
+                source_account['balance'] -= expense_in_account_currency
+                source_account['balance_usd'] = source_account['balance'] / rates.get(source_account['currency'], 1) if source_account['currency'] != 'USD' else source_account['balance']
+                source_account['last_updated'] = datetime.now().isoformat() + "Z"
+                
+                # Update recurring expense record
+                expense['last_processed'] = today
+                expense['next_due_date'] = calculate_next_due_date(expense['next_due_date'], expense['frequency'])
+                
+                transactions_processed.append({
+                    'type': 'expense',
+                    'name': expense['name'],
+                    'amount': expense_amount,
+                    'currency': expense['currency'],
+                    'account': source_account['name'],
+                    'date': today
+                })
+    
+    return transactions_processed
 
 def usd_to_target(value_usd, target, rates=None, debug=False):
     """Convert a USD value to target currency using provided rates.
@@ -194,6 +359,18 @@ def api_portfolio():
     """Return the networth data as JSON. Refresh prices if stored data is stale (TTL)."""
     errors = []
     portfolio_data = load_portfolio()
+    
+    # Process recurring transactions first
+    try:
+        processed_transactions = process_recurring_transactions(portfolio_data)
+        if processed_transactions:
+            save_portfolio(portfolio_data)
+            # Add info about processed transactions to response
+            for transaction in processed_transactions:
+                errors.append(f"Processed {transaction['type']}: {transaction['name']} - {transaction['amount']} {transaction['currency']} for {transaction['account']}")
+    except Exception as e:
+        errors.append(f"Error processing recurring transactions: {e}")
+    
     stocks = portfolio_data.get('investments', {}).get('stocks', [])
     cryptos = portfolio_data.get('investments', {}).get('cryptos', [])
     savings = portfolio_data.get('savings', [])
@@ -712,6 +889,176 @@ def api_portfolio_update():
         
         save_portfolio(portfolio_data)
         return jsonify({'ok': True, 'entry': item})
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@My_Networth_blueprint.route('/api/recurring', methods=['GET'])
+def api_recurring_list():
+    """Get all recurring transactions"""
+    portfolio_data = load_portfolio()
+    recurring = portfolio_data.get('recurring_transactions', {'income': [], 'expenses': []})
+    
+    # Get account names for display
+    account_map = {}
+    for account in portfolio_data.get('savings', []):
+        account_map[account['id']] = account['name']
+    
+    # Add account names to transactions
+    for income in recurring['income']:
+        income['target_account_name'] = account_map.get(income.get('target_account_id'), 'Unknown Account')
+    
+    for expense in recurring['expenses']:
+        expense['source_account_name'] = account_map.get(expense.get('source_account_id'), 'Unknown Account')
+    
+    return jsonify(recurring)
+
+
+@My_Networth_blueprint.route('/api/recurring/income/add', methods=['POST'])
+def api_recurring_income_add():
+    """Add a new recurring income"""
+    try:
+        body = request.get_json(force=True)
+        portfolio_data = load_portfolio()
+        
+        # Validate required fields
+        required_fields = ['name', 'amount', 'currency', 'frequency', 'start_date', 'target_account_id']
+        for field in required_fields:
+            if field not in body:
+                return jsonify({'error': f'Missing required field: {field}'}), 400
+        
+        # Validate target account exists
+        target_account_exists = any(account['id'] == body['target_account_id'] for account in portfolio_data.get('savings', []))
+        if not target_account_exists:
+            return jsonify({'error': 'Target account not found'}), 400
+        
+        # Create new recurring income
+        new_income = {
+            'id': get_next_id('recurring_income', portfolio_data.get('recurring_transactions', {}).get('income', [])),
+            'name': body['name'].strip(),
+            'amount': float(body['amount']),
+            'currency': body['currency'].strip().upper(),
+            'frequency': body['frequency'].strip().lower(),
+            'start_date': body['start_date'],
+            'end_date': body.get('end_date'),
+            'next_due_date': body['start_date'],  # First occurrence
+            'target_account_id': body['target_account_id'],
+            'description': body.get('description', '').strip(),
+            'is_active': body.get('is_active', True),
+            'last_processed': None,
+            'created_date': datetime.now().isoformat() + "Z"
+        }
+        
+        if 'recurring_transactions' not in portfolio_data:
+            portfolio_data['recurring_transactions'] = {'income': [], 'expenses': []}
+        
+        portfolio_data['recurring_transactions']['income'].append(new_income)
+        save_portfolio(portfolio_data)
+        
+        return jsonify({'ok': True, 'entry': new_income})
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@My_Networth_blueprint.route('/api/recurring/expense/add', methods=['POST'])
+def api_recurring_expense_add():
+    """Add a new recurring expense"""
+    try:
+        body = request.get_json(force=True)
+        portfolio_data = load_portfolio()
+        
+        # Validate required fields
+        required_fields = ['name', 'amount', 'currency', 'frequency', 'start_date', 'source_account_id']
+        for field in required_fields:
+            if field not in body:
+                return jsonify({'error': f'Missing required field: {field}'}), 400
+        
+        # Validate source account exists
+        source_account_exists = any(account['id'] == body['source_account_id'] for account in portfolio_data.get('savings', []))
+        if not source_account_exists:
+            return jsonify({'error': 'Source account not found'}), 400
+        
+        # Create new recurring expense
+        new_expense = {
+            'id': get_next_id('recurring_expense', portfolio_data.get('recurring_transactions', {}).get('expenses', [])),
+            'name': body['name'].strip(),
+            'amount': float(body['amount']),
+            'currency': body['currency'].strip().upper(),
+            'frequency': body['frequency'].strip().lower(),
+            'start_date': body['start_date'],
+            'end_date': body.get('end_date'),
+            'next_due_date': body['start_date'],  # First occurrence
+            'source_account_id': body['source_account_id'],
+            'category': body.get('category', 'general').strip(),
+            'description': body.get('description', '').strip(),
+            'is_active': body.get('is_active', True),
+            'last_processed': None,
+            'created_date': datetime.now().isoformat() + "Z"
+        }
+        
+        if 'recurring_transactions' not in portfolio_data:
+            portfolio_data['recurring_transactions'] = {'income': [], 'expenses': []}
+        
+        portfolio_data['recurring_transactions']['expenses'].append(new_expense)
+        save_portfolio(portfolio_data)
+        
+        return jsonify({'ok': True, 'entry': new_expense})
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@My_Networth_blueprint.route('/api/recurring/delete', methods=['POST'])
+def api_recurring_delete():
+    """Delete a recurring transaction. Expects JSON {type: 'income'|'expense', id: str}"""
+    try:
+        body = request.get_json(force=True)
+        transaction_type = body.get('type')
+        transaction_id = body.get('id')
+        
+        if transaction_type not in ('income', 'expense'):
+            return jsonify({'error': 'Invalid transaction type'}), 400
+            
+        portfolio_data = load_portfolio()
+        recurring = portfolio_data.get('recurring_transactions', {'income': [], 'expenses': []})
+        
+        if transaction_type == 'income':
+            items = recurring.get('income', [])
+            items_updated = [item for item in items if item.get('id') != transaction_id]
+            if len(items_updated) == len(items):
+                return jsonify({'error': 'Transaction not found'}), 404
+            portfolio_data['recurring_transactions']['income'] = items_updated
+        else:  # expense
+            items = recurring.get('expenses', [])
+            items_updated = [item for item in items if item.get('id') != transaction_id]
+            if len(items_updated) == len(items):
+                return jsonify({'error': 'Transaction not found'}), 404
+            portfolio_data['recurring_transactions']['expenses'] = items_updated
+        
+        save_portfolio(portfolio_data)
+        return jsonify({'ok': True})
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@My_Networth_blueprint.route('/api/recurring/process', methods=['POST'])
+def api_recurring_process():
+    """Manually trigger recurring transaction processing"""
+    try:
+        portfolio_data = load_portfolio()
+        processed_transactions = process_recurring_transactions(portfolio_data)
+        
+        if processed_transactions:
+            save_portfolio(portfolio_data)
+        
+        return jsonify({
+            'ok': True,
+            'processed_count': len(processed_transactions),
+            'transactions': processed_transactions
+        })
         
     except Exception as e:
         return jsonify({'error': str(e)}), 500

@@ -59,7 +59,8 @@ def initialize_missing_levels():
                     'artikel': artikel,
                     'deutsch': deutsch,
                     'english': english,
-                    'status': 'notyetanswered'
+                    'status': 'notyetanswered',
+                    'incorrect_count': 0
                 }
                 progress_data[level].append(word_entry)
             updated = True
@@ -77,7 +78,8 @@ def initialize_missing_levels():
                             'artikel': item[0] if item[0] else '',
                             'deutsch': item[1],
                             'english': item[2],
-                            'status': 'notyetanswered'
+                            'status': 'notyetanswered',
+                            'incorrect_count': 0
                         }
                         progress_data[level].append(word_entry)
                 updated = True
@@ -126,6 +128,71 @@ def update_word_status(level, artikel, deutsch, english, new_status):
             word['deutsch'] == deutsch and 
             word['english'] == english):
             word['status'] = new_status
+            save_progress()
+            return True
+    return False
+
+def increment_incorrect_count(level, artikel, deutsch, english):
+    """Increment the incorrect count for a specific word"""
+    if level not in progress_data:
+        initialize_missing_levels()
+    
+    for word in progress_data[level]:
+        if (word['artikel'] == artikel and 
+            word['deutsch'] == deutsch and 
+            word['english'] == english):
+            # Initialize incorrect_count if it doesn't exist (for backwards compatibility)
+            if 'incorrect_count' not in word:
+                word['incorrect_count'] = 0
+            word['incorrect_count'] += 1
+            save_progress()
+            return word['incorrect_count']
+    return 0
+
+def get_word_incorrect_count(level, artikel, deutsch, english):
+    """Get the incorrect count for a specific word"""
+    if level not in progress_data:
+        initialize_missing_levels()
+    
+    for word in progress_data[level]:
+        if (word['artikel'] == artikel and 
+            word['deutsch'] == deutsch and 
+            word['english'] == english):
+            return word.get('incorrect_count', 0)
+    return 0
+
+def get_most_difficult_words(level, limit=10):
+    """Get the words with the highest incorrect counts for a level"""
+    if level not in progress_data:
+        initialize_missing_levels()
+    
+    # Ensure all words have incorrect_count field
+    for word in progress_data[level]:
+        if 'incorrect_count' not in word:
+            word['incorrect_count'] = 0
+    
+    # Sort words by incorrect_count in descending order
+    difficult_words = sorted(
+        progress_data[level], 
+        key=lambda w: w.get('incorrect_count', 0), 
+        reverse=True
+    )
+    
+    # Filter out words with 0 incorrect count
+    difficult_words = [w for w in difficult_words if w.get('incorrect_count', 0) > 0]
+    
+    return difficult_words[:limit]
+
+def reset_word_incorrect_count(level, artikel, deutsch, english):
+    """Reset the incorrect count for a specific word"""
+    if level not in progress_data:
+        initialize_missing_levels()
+    
+    for word in progress_data[level]:
+        if (word['artikel'] == artikel and 
+            word['deutsch'] == deutsch and 
+            word['english'] == english):
+            word['incorrect_count'] = 0
             save_progress()
             return True
     return False
@@ -179,17 +246,30 @@ def get_completion_stats(level):
     if level not in progress_data:
         initialize_missing_levels()
     
+    # Ensure all words have incorrect_count field (backwards compatibility)
+    for word in progress_data[level]:
+        if 'incorrect_count' not in word:
+            word['incorrect_count'] = 0
+    
     total = len(progress_data[level])
     correct = len([w for w in progress_data[level] if w['status'] == 'correct'])
     incorrect = len([w for w in progress_data[level] if w['status'] == 'incorrect'])
     not_answered = len([w for w in progress_data[level] if w['status'] == 'notyetanswered'])
+    
+    # Calculate stats about incorrect counts
+    total_incorrect_attempts = sum(w.get('incorrect_count', 0) for w in progress_data[level])
+    words_with_errors = len([w for w in progress_data[level] if w.get('incorrect_count', 0) > 0])
+    most_difficult_count = max([w.get('incorrect_count', 0) for w in progress_data[level]], default=0)
     
     return {
         'total': total,
         'correct': correct,
         'incorrect': incorrect,
         'not_answered': not_answered,
-        'completed': not_answered == 0 and incorrect == 0
+        'completed': not_answered == 0 and incorrect == 0,
+        'total_incorrect_attempts': total_incorrect_attempts,
+        'words_with_errors': words_with_errors,
+        'most_difficult_count': most_difficult_count
     }
 
 # Get distinct levels for filtering
@@ -347,8 +427,39 @@ def update_vocab_csv(english_word, old_german, old_artikel, new_german, new_engl
 @Deutsch_Vocab_blueprint.route('/Deutsch_Vocab_html', methods=['GET', 'POST'])
 def deutsch_vocab():
     try:
-        # Get level from form (POST) or query params (GET), default to A1.1
-        level = request.form.get('level') or request.args.get('level', 'A1.1')
+        # Get levels from form (POST) or query params (GET)
+        # Support both single level (backwards compatibility) and multiple levels
+        if request.method == 'POST':
+            # Handle multiple levels from form
+            selected_levels = request.form.getlist('levels')  # Get list of selected levels
+            if not selected_levels:
+                # Fallback to single level for backwards compatibility
+                single_level = request.form.get('level', 'A1.1')
+                selected_levels = [single_level] if single_level else ['A1.1']
+        else:
+            # Handle multiple levels from query parameters
+            levels_param = request.args.getlist('levels')  # Use getlist for multiple 'levels' parameters
+            if levels_param:
+                selected_levels = levels_param
+            else:
+                # Check for comma-separated levels in a single parameter
+                levels_param = request.args.get('levels', '')
+                if levels_param:
+                    # Multiple levels separated by comma: ?levels=A1.1,A1.2,B1.1
+                    selected_levels = [level.strip() for level in levels_param.split(',') if level.strip()]
+                else:
+                    # Single level for backwards compatibility
+                    single_level = request.args.get('level', 'A1.1')
+                    selected_levels = [single_level]
+        
+        # Ensure at least one level is selected
+        if not selected_levels:
+            selected_levels = ['A1.1']
+        
+        # Filter to valid levels only
+        selected_levels = [level for level in selected_levels if level in level_options]
+        if not selected_levels:
+            selected_levels = ['A1.1']  # Fallback
         
         # Get toggle states from form or query params
         difficult_only = (request.form.get('difficult_only', 'false').lower() == 'true' or 
@@ -356,16 +467,15 @@ def deutsch_vocab():
         articles_mandatory = (request.form.get('articles_mandatory', 'false').lower() == 'true' or
                             request.args.get('articles_mandatory', 'false') == 'true')
         
-        # Ensure progress is initialized for this level
-        if level not in progress_data:
-            initialize_missing_levels()
-        
-        # Filter the dataframe based on the level
-        level_vocab = vocab_df[vocab_df['Level'] == level]
+        # Ensure progress is initialized for all selected levels
+        for level in selected_levels:
+            if level not in progress_data:
+                initialize_missing_levels()
 
         if request.method == 'POST':
             if request.form.get('english_word'):
-                # This is a word submission
+                # This is a word submission - get the specific level for this word
+                word_level = request.form.get('word_level', selected_levels[0])  # Track which level this word came from
                 english_word = request.form['english_word']
                 user_input = request.form['user_input'].strip()
                 correct_deutsch = request.form['correct_deutsch'].strip()
@@ -376,7 +486,7 @@ def deutsch_vocab():
                 pre_difficulty = request.form.get('pre_difficulty')
                 if pre_difficulty is not None:
                     is_difficult = pre_difficulty.lower() == 'true'
-                    mark_word_difficulty(level, artikel, correct_deutsch, english_word, is_difficult)
+                    mark_word_difficulty(word_level, artikel, correct_deutsch, english_word, is_difficult)
 
                 # Check if this is a correction submission
                 is_correction = request.form.get('is_correction', 'false') == 'true'
@@ -407,7 +517,7 @@ def deutsch_vocab():
                         new_german=corrected_german,
                         new_english=corrected_english,
                         new_artikel=corrected_artikel,
-                        level=level
+                        level=word_level
                     )
                     
                     message = 'Thank you! Your corrections have been saved to the database: {}'.format(
@@ -415,9 +525,25 @@ def deutsch_vocab():
                                  if correction_details['corrected'][k] != correction_details['original'][k]])
                     ) if update_success else 'Your correction was noted but there was an issue updating the file.'
                     
+                    # Try to fetch an example sentence (Beispielsatz) for this word
+                    beispielsatz = ''
+                    try:
+                        if 'Beispielsatz' in vocab_df.columns:
+                            mask = (vocab_df['Level'] == word_level) & (vocab_df['Deutsch'] == correct_deutsch)
+                            artik_series = vocab_df['Artikel'].fillna('').astype(str)
+                            mask = mask & (artik_series == (artikel if artikel else ''))
+                            row = vocab_df[mask]
+                            if not row.empty:
+                                beispielsatz_val = row.iloc[0].get('Beispielsatz')
+                                if pd.notna(beispielsatz_val):
+                                    beispielsatz = str(beispielsatz_val)
+                    except Exception:
+                        beispielsatz = ''
+
                     return jsonify({
                         'type': 'correction_submitted', 
                         'message': message,
+                        'beispielsatz': beispielsatz,
                         'metrics': {
                             'correct': True,
                             'retry': False,
@@ -425,6 +551,7 @@ def deutsch_vocab():
                             'word': correct_deutsch,
                             'english': english_word,
                             'artikel': artikel,
+                            'level': word_level,
                             'update_success': update_success,
                             'timestamp': datetime.now().isoformat()
                         }
@@ -450,38 +577,58 @@ def deutsch_vocab():
                                  user_clean == correct_with_artikel or
                                  (artikel_clean and user_clean == f"{correct_clean} {artikel_clean}"))
 
+                # Try to fetch an example sentence (Beispielsatz) for this word
+                beispielsatz = ''
+                try:
+                    if 'Beispielsatz' in vocab_df.columns:
+                        mask = (vocab_df['Level'] == word_level) & (vocab_df['Deutsch'] == correct_deutsch)
+                        artik_series = vocab_df['Artikel'].fillna('').astype(str)
+                        mask = mask & (artik_series == (artikel if artikel else ''))
+                        row = vocab_df[mask]
+                        if not row.empty:
+                            beispielsatz_val = row.iloc[0].get('Beispielsatz')
+                            if pd.notna(beispielsatz_val):
+                                beispielsatz = str(beispielsatz_val)
+                except Exception:
+                    beispielsatz = ''
+
                 if is_correct:
                     # Update word status to 'correct' (only if not practice retry)
                     if not is_retry:
                         # First-time correct answer
-                        update_word_status(level, artikel, correct_deutsch, english_word, 'correct')
-                        message = 'Correct! The word "{}" is {} {}.'.format(english_word, artikel, correct_deutsch)
+                        update_word_status(word_level, artikel, correct_deutsch, english_word, 'correct')
+                        message = 'Correct! The word "{}" is {} {}. (Level: {})'.format(english_word, artikel, correct_deutsch, word_level)
                     else:
                         # Practice retry - don't change status, just acknowledge
-                        message = 'Good practice! Remember: "{}" is {} {}.'.format(english_word, artikel, correct_deutsch)
+                        message = 'Good practice! Remember: "{}" is {} {}. (Level: {})'.format(english_word, artikel, correct_deutsch, word_level)
                     
                     flash_message = {
                         'type': 'success',
                         'message': message,
+                        'beispielsatz': beispielsatz,
                         'metrics': {
                             'correct': True,
                             'retry': is_retry,
                             'word': correct_deutsch,
                             'english': english_word,
                             'artikel': artikel,
+                            'level': word_level,
                             'timestamp': datetime.now().isoformat()
                         }
                     }
                 else:
                     # Incorrect answer
                     if not is_retry:
-                        # First attempt wrong - mark as incorrect for spaced repetition
-                        update_word_status(level, artikel, correct_deutsch, english_word, 'incorrect')
+                        # First attempt wrong - mark as incorrect for spaced repetition and increment count
+                        update_word_status(word_level, artikel, correct_deutsch, english_word, 'incorrect')
+                        incorrect_count = increment_incorrect_count(word_level, artikel, correct_deutsch, english_word)
+                        
                         flash_message = {
                             'type': 'retry_with_correction',
-                            'message': 'Incorrect. The correct answer is "{} {}". Please practice typing it:'.format(artikel, correct_deutsch),
+                            'message': 'Incorrect. The correct answer is "{} {}". Please practice typing it: (Level: {})'.format(artikel, correct_deutsch, word_level),
                             'correct_answer': correct_deutsch,
                             'artikel': artikel,
+                            'beispielsatz': beispielsatz,
                             'english_word': english_word,
                             'metrics': {
                                 'correct': False,
@@ -489,17 +636,22 @@ def deutsch_vocab():
                                 'word': correct_deutsch,
                                 'english': english_word,
                                 'artikel': artikel,
+                                'level': word_level,
                                 'user_answer': user_input,
+                                'incorrect_count': incorrect_count,
                                 'timestamp': datetime.now().isoformat()
                             }
                         }
                     else:
-                        # Retry still wrong - status already 'incorrect', just acknowledge
+                        # Retry still wrong - increment count again (they're still struggling with this word)
+                        incorrect_count = increment_incorrect_count(word_level, artikel, correct_deutsch, english_word)
+                        
                         flash_message = {
                             'type': 'error_with_correction',
-                            'message': 'Still incorrect. The correct answer is "{} {}". Try again or suggest a correction.'.format(artikel, correct_deutsch),
+                            'message': 'Still incorrect. The correct answer is "{} {}". Try again or suggest a correction. (Level: {})'.format(artikel, correct_deutsch, word_level),
                             'correct_answer': correct_deutsch,
                             'artikel': artikel,
+                            'beispielsatz': beispielsatz,
                             'english_word': english_word,
                             'user_answer': user_input,
                             'metrics': {
@@ -508,7 +660,9 @@ def deutsch_vocab():
                                 'word': correct_deutsch,
                                 'english': english_word,
                                 'artikel': artikel,
+                                'level': word_level,
                                 'user_answer': user_input,
+                                'incorrect_count': incorrect_count,
                                 'timestamp': datetime.now().isoformat()
                             }
                         }
@@ -516,12 +670,13 @@ def deutsch_vocab():
                 return jsonify(flash_message)
             # Handle difficulty marking
             elif request.form.get('mark_difficulty'):
+                word_level = request.form.get('word_level', selected_levels[0])
                 artikel = request.form.get('artikel', '').strip()
                 deutsch = request.form.get('deutsch', '').strip()
                 english = request.form.get('english', '').strip()
                 difficulty = request.form.get('difficulty') == 'true'
                 
-                success = mark_word_difficulty(level, artikel, deutsch, english, difficulty)
+                success = mark_word_difficulty(word_level, artikel, deutsch, english, difficulty)
                 if success:
                     status = 'difficult' if difficulty else 'normal'
                     return jsonify({
@@ -535,37 +690,57 @@ def deutsch_vocab():
                         'message': 'Failed to update difficulty'
                     })
 
-        # NEW TUPLE-STATE LOGIC: Get words that need practice
-        # Check for difficulty filter in request
-        difficult_only = request.args.get('difficult_only', 'false') == 'true'
-        words_to_practice = get_words_to_practice(level, difficult_only)
+        # NEW TUPLE-STATE LOGIC: Get words that need practice from all selected levels
+        # Aggregate words from all selected levels
+        all_words_to_practice = []
+        all_stats = {'total': 0, 'correct': 0, 'incorrect': 0, 'not_answered': 0, 'completed': True}
         
-        # Check completion
-        stats = get_completion_stats(level)
-        if stats['completed']:
-            # All words mastered!
+        for level in selected_levels:
+            words_for_level = get_words_to_practice(level, difficult_only)
+            # Add level information to each word
+            for word in words_for_level:
+                word['level'] = level  # Track which level each word comes from
+            all_words_to_practice.extend(words_for_level)
+            
+            # Aggregate statistics
+            level_stats = get_completion_stats(level)
+            all_stats['total'] += level_stats['total']
+            all_stats['correct'] += level_stats['correct']
+            all_stats['incorrect'] += level_stats['incorrect']
+            all_stats['not_answered'] += level_stats['not_answered']
+            # Only consider fully completed if ALL selected levels are completed
+            if not level_stats['completed']:
+                all_stats['completed'] = False
+        
+        # Check completion for all selected levels
+        if all_stats['completed']:
+            # All words in all selected levels mastered!
             return render_template('Deutsch_Vocab_html.html', 
                                  completed=True, 
-                                 level=level, 
-                                 total_words=stats['total'],
+                                 selected_levels=selected_levels,  # Pass list of levels
+                                 levels_display=', '.join(selected_levels),  # For display
+                                 total_words=all_stats['total'],
                                  level_options=level_options,
                                  difficult_only=difficult_only,
                                  articles_mandatory=articles_mandatory)
         
         # Select a random word from words that need practice
-        if not words_to_practice:
-            error_msg = "No difficult words available for practice." if difficult_only else "No words available for practice."
+        if not all_words_to_practice:
+            error_msg = "No difficult words available for practice in selected levels." if difficult_only else "No words available for practice in selected levels."
             return render_template('Deutsch_Vocab_html.html', 
                                  error=error_msg, 
+                                 selected_levels=selected_levels,
+                                 levels_display=', '.join(selected_levels),
                                  level_options=level_options,
                                  difficult_only=difficult_only,
                                  articles_mandatory=articles_mandatory)
         
         # Pick a random word to practice
-        selected_word = random.choice(words_to_practice)
+        selected_word = random.choice(all_words_to_practice)
         artikel = selected_word['artikel']
         deutsch_word = selected_word['deutsch'] 
         english_word = selected_word['english']
+        word_level = selected_word['level']  # Get the specific level this word is from
 
         # Don't display 'nan' if Artikel is blank
         artikel_display = artikel if artikel else ''
@@ -575,19 +750,23 @@ def deutsch_vocab():
                              english_word=english_word, 
                              correct_deutsch=deutsch_word, 
                              artikel=artikel_display, 
-                             level=level, 
+                             word_level=word_level,  # Pass the specific level this word is from
+                             selected_levels=selected_levels,  # Pass list of selected levels
+                             levels_display=', '.join(selected_levels),  # For display
                              level_options=level_options,
-                             total_words=stats['total'],
-                             completed_words=stats['correct'],
+                             total_words=all_stats['total'],
+                             completed_words=all_stats['correct'],
                              difficult_only=difficult_only,
                              articles_mandatory=articles_mandatory)
 
     except Exception as e:
         return render_template('Deutsch_Vocab_html.html', 
                              error="Error occurred: " + str(e), 
+                             selected_levels=['A1.1'],  # Default fallback
+                             levels_display='A1.1',
                              level_options=level_options,
-                             difficult_only=difficult_only,
-                             articles_mandatory=articles_mandatory)
+                             difficult_only=False,
+                             articles_mandatory=False)
 
 
 @Deutsch_Vocab_blueprint.route('/vocab/<level>/progress', methods=['GET'])
@@ -624,9 +803,10 @@ def reset_level_progress(level):
     try:
         # Reset progress for this level by reinitializing
         if level in progress_data:
-            # Reset all words for this level to 'notyetanswered'
+            # Reset all words for this level to 'notyetanswered' and reset incorrect counts
             for word in progress_data[level]:
                 word['status'] = 'notyetanswered'
+                word['incorrect_count'] = 0
             save_progress()
         else:
             # Initialize the level if it doesn't exist
@@ -661,3 +841,61 @@ def reset_all_progress():
 
 # Initialize progress on startup
 load_progress()
+
+
+@Deutsch_Vocab_blueprint.route('/vocab/<level>/difficult-words', methods=['GET'])
+def get_difficult_words(level):
+    """Get the most difficult words (highest incorrect counts) for a level"""
+    try:
+        limit = int(request.args.get('limit', 10))
+        difficult_words = get_most_difficult_words(level, limit)
+        
+        return jsonify({
+            'status': 'success',
+            'level': level,
+            'difficult_words': difficult_words,
+            'count': len(difficult_words)
+        })
+        
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)})
+
+
+@Deutsch_Vocab_blueprint.route('/vocab/<level>/stats', methods=['GET'])
+def get_level_stats(level):
+    """Get detailed statistics for a level including incorrect counts"""
+    try:
+        stats = get_completion_stats(level)
+        difficult_words = get_most_difficult_words(level, 5)  # Top 5 most difficult
+        
+        return jsonify({
+            'status': 'success',
+            'level': level,
+            'stats': stats,
+            'top_difficult_words': difficult_words
+        })
+        
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)})
+
+
+@Deutsch_Vocab_blueprint.route('/vocab/<level>/reset-incorrect-counts', methods=['POST'])
+def reset_level_incorrect_counts(level):
+    """Reset all incorrect counts for a level"""
+    try:
+        if level not in progress_data:
+            return jsonify({'status': 'error', 'message': 'Level not found'})
+        
+        # Reset incorrect_count for all words in the level
+        for word in progress_data[level]:
+            word['incorrect_count'] = 0
+        
+        save_progress()
+        
+        return jsonify({
+            'status': 'success',
+            'message': f'All incorrect counts for level {level} have been reset'
+        })
+        
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)})

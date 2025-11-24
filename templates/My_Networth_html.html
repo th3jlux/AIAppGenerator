@@ -346,15 +346,22 @@
                         <table class="category-table">
                             <thead>
                                 <tr>
+                                    <th style="width: 30px;"></th>
+                                    <th style="width: 30px;"></th>
                                     <th>Property</th>
                                     <th>Market Value</th>
                                     <th>Equity</th>
-                                    <th>Actions</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {% for property in real_estate %}
                                     <tr>
+                                        <td>
+                                            <button class="btn btn-small danger" onclick="deleteEntry('real_estate', '{{ property.id }}')" style="padding: 4px 8px; font-size: 12px;" title="Delete">✕</button>
+                                        </td>
+                                        <td>
+                                            <button class="btn btn-small" onclick="editEntry('real_estate', '{{ property.id }}')" style="padding: 4px 8px; font-size: 12px;" title="Edit">✏️</button>
+                                        </td>
                                         <td>
                                             <strong>{{ property.name }}</strong>
                                             {% if property.address != "Not specified" %}
@@ -367,12 +374,6 @@
                                         <td><strong>{{ get_currency_symbol(currency) }}{{ format_currency_value(property.display_value, currency) }}</strong></td>
                                         <td style="color: {{ '#28a745' if property.equity > 0 else '#6c757d' }};">
                                             <strong>{{ get_currency_symbol(currency) }}{{ format_currency_value(property.equity, currency) }}</strong>
-                                        </td>
-                                        <td>
-                                            <div class="action-buttons">
-                                                <button class="btn btn-small" onclick="editEntry('real_estate', '{{ property.id }}')">Edit</button>
-                                                <button class="btn btn-small danger" onclick="deleteEntry('real_estate', '{{ property.id }}')">Delete</button>
-                                            </div>
                                         </td>
                                     </tr>
                                 {% endfor %}
@@ -405,24 +406,25 @@
                         <table class="category-table">
                             <thead>
                                 <tr>
+                                    <th style="width: 30px;"></th>
+                                    <th style="width: 30px;"></th>
                                     <th>Symbol</th>
                                     <th>Shares</th>
                                     <th>Value</th>
-                                    <th>Actions</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {% for stock in stocks %}
                                     <tr>
+                                        <td>
+                                            <button class="btn btn-small danger" onclick="deleteEntry('stocks', '{{ stock.id }}')" style="padding: 4px 8px; font-size: 12px;" title="Delete">✕</button>
+                                        </td>
+                                        <td>
+                                            <button class="btn btn-small" onclick="editEntry('stocks', '{{ stock.id }}')" style="padding: 4px 8px; font-size: 12px;" title="Edit">✏️</button>
+                                        </td>
                                         <td><strong style="color: #007bff;">{{ stock.symbol }}</strong></td>
                                         <td>{{ "%.2f"|format(stock.shares) }}</td>
                                         <td><strong>{{ get_currency_symbol(currency) }}{{ format_currency_value(stock.market_value, currency) }}</strong></td>
-                                        <td>
-                                            <div class="action-buttons">
-                                                <button class="btn btn-small" onclick="editEntry('stocks', '{{ stock.id }}')">Edit</button>
-                                                <button class="btn btn-small danger" onclick="deleteEntry('stocks', '{{ stock.id }}')">Delete</button>
-                                            </div>
-                                        </td>
                                     </tr>
                                 {% endfor %}
                             </tbody>
@@ -448,24 +450,25 @@
                         <table class="category-table">
                             <thead>
                                 <tr>
+                                    <th style="width: 30px;"></th>
+                                    <th style="width: 30px;"></th>
                                     <th>Symbol</th>
                                     <th>Amount</th>
                                     <th>Value</th>
-                                    <th>Actions</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {% for crypto in cryptos %}
                                     <tr>
+                                        <td>
+                                            <button class="btn btn-small danger" onclick="deleteEntry('cryptos', '{{ crypto.id }}')" style="padding: 4px 8px; font-size: 12px;" title="Delete">✕</button>
+                                        </td>
+                                        <td>
+                                            <button class="btn btn-small" onclick="editEntry('cryptos', '{{ crypto.id }}')" style="padding: 4px 8px; font-size: 12px;" title="Edit">✏️</button>
+                                        </td>
                                         <td><strong style="color: #f7931a;">{{ crypto.symbol }}</strong></td>
                                         <td>{{ crypto.amount }}</td>
                                         <td><strong>{{ get_currency_symbol(currency) }}{{ format_currency_value(crypto.market_value, currency) }}</strong></td>
-                                        <td>
-                                            <div class="action-buttons">
-                                                <button class="btn btn-small" onclick="editEntry('cryptos', '{{ crypto.id }}')">Edit</button>
-                                                <button class="btn btn-small danger" onclick="deleteEntry('cryptos', '{{ crypto.id }}')">Delete</button>
-                                            </div>
-                                        </td>
                                     </tr>
                                 {% endfor %}
                             </tbody>
@@ -496,24 +499,25 @@
                         <table class="category-table">
                             <thead>
                                 <tr>
+                                    <th style="width: 30px;"></th>
+                                    <th style="width: 30px;"></th>
                                     <th>Account</th>
                                     <th>Institution</th>
                                     <th>Balance</th>
-                                    <th>Actions</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {% for saving in savings %}
                                     <tr>
+                                        <td>
+                                            <button class="btn btn-small danger" onclick="deleteEntry('savings', '{{ saving.id }}')" style="padding: 4px 8px; font-size: 12px;" title="Delete">✕</button>
+                                        </td>
+                                        <td>
+                                            <button class="btn btn-small" onclick="editEntry('savings', '{{ saving.id }}')" style="padding: 4px 8px; font-size: 12px;" title="Edit">✏️</button>
+                                        </td>
                                         <td><strong>{{ saving.name }}</strong></td>
                                         <td><small>{{ saving.institution }}</small></td>
                                         <td><strong>{{ get_currency_symbol(currency) }}{{ format_currency_value(saving.display_value, currency) }}</strong></td>
-                                        <td>
-                                            <div class="action-buttons">
-                                                <button class="btn btn-small" onclick="editEntry('savings', '{{ saving.id }}')">Edit</button>
-                                                <button class="btn btn-small danger" onclick="deleteEntry('savings', '{{ saving.id }}')">Delete</button>
-                                            </div>
-                                        </td>
                                     </tr>
                                 {% endfor %}
                             </tbody>
@@ -539,15 +543,22 @@
                         <table class="category-table">
                             <thead>
                                 <tr>
+                                    <th style="width: 30px;"></th>
+                                    <th style="width: 30px;"></th>
                                     <th>Loan</th>
                                     <th>Outstanding</th>
                                     <th>Rate</th>
-                                    <th>Actions</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {% for loan in loans %}
                                     <tr>
+                                        <td>
+                                            <button class="btn btn-small danger" onclick="deleteEntry('loans', '{{ loan.id }}')" style="padding: 4px 8px; font-size: 12px;" title="Delete">✕</button>
+                                        </td>
+                                        <td>
+                                            <button class="btn btn-small" onclick="editEntry('loans', '{{ loan.id }}')" style="padding: 4px 8px; font-size: 12px;" title="Edit">✏️</button>
+                                        </td>
                                         <td>
                                             <strong>{{ loan.name }}</strong>
                                             {% if loan.linked_property_id %}
@@ -556,12 +567,6 @@
                                         </td>
                                         <td style="color: #dc3545;"><strong>{{ get_currency_symbol(currency) }}{{ format_currency_value(loan.display_value, currency) }}</strong></td>
                                         <td>{{ loan.interest_rate }}%</td>
-                                        <td>
-                                            <div class="action-buttons">
-                                                <button class="btn btn-small" onclick="editEntry('loans', '{{ loan.id }}')">Edit</button>
-                                                <button class="btn btn-small danger" onclick="deleteEntry('loans', '{{ loan.id }}')">Delete</button>
-                                            </div>
-                                        </td>
                                     </tr>
                                 {% endfor %}
                             </tbody>
@@ -573,6 +578,47 @@
                             <small>No debt is good debt! 🎉</small>
                         </div>
                     {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Recurring Transactions Section -->
+        <div class="category-grid">
+            <!-- Recurring Income Section -->
+            <div class="category-section">
+                <div class="category-header">
+                    <span><span class="category-icon">🔄</span>Recurring Income</span>
+                    <span class="total">
+                        <button class="btn btn-small" onclick="showAddRecurringForm('income')" style="background: #52a963;">+ Add</button>
+                    </span>
+                </div>
+                <div class="category-content">
+                    <div id="recurringIncomeList">
+                        <!-- Will be populated by JavaScript -->
+                        <div style="padding: 30px; text-align: center; color: #9ca3af;">
+                            <div style="font-size: 3em; margin-bottom: 10px;">🔄</div>
+                            <div>Loading recurring income...</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Recurring Expenses Section -->
+            <div class="category-section">
+                <div class="category-header">
+                    <span><span class="category-icon">🔄</span>Recurring Expenses</span>
+                    <span class="total">
+                        <button class="btn btn-small" onclick="showAddRecurringForm('expense')" style="background: #e07a7a;">+ Add</button>
+                    </span>
+                </div>
+                <div class="category-content">
+                    <div id="recurringExpensesList">
+                        <!-- Will be populated by JavaScript -->
+                        <div style="padding: 30px; text-align: center; color: #9ca3af;">
+                            <div style="font-size: 3em; margin-bottom: 10px;">🔄</div>
+                            <div>Loading recurring expenses...</div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -703,6 +749,322 @@
                 });
             }
         });
+    </script>
+
+    <!-- Recurring Transaction Modal -->
+    <div id="recurringModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 1000; align-items: center; justify-content: center;">
+        <div style="background: #2d2d2d; border-radius: 12px; padding: 30px; max-width: 500px; width: 90%; color: #e1e5e9;">
+            <h3 id="modalTitle">Add Recurring Transaction</h3>
+            <form id="recurringForm">
+                <div style="margin-bottom: 15px;">
+                    <label>Name:</label>
+                    <input type="text" id="recurringName" required style="width: 100%; padding: 8px; margin-top: 5px; background: #3a3a3a; color: #e1e5e9; border: 1px solid #4a4a4a; border-radius: 4px;">
+                </div>
+                
+                <div style="display: flex; gap: 15px; margin-bottom: 15px;">
+                    <div style="flex: 1;">
+                        <label>Amount:</label>
+                        <input type="number" step="0.01" id="recurringAmount" required style="width: 100%; padding: 8px; margin-top: 5px; background: #3a3a3a; color: #e1e5e9; border: 1px solid #4a4a4a; border-radius: 4px;">
+                    </div>
+                    <div style="flex: 1;">
+                        <label>Currency:</label>
+                        <select id="recurringCurrency" style="width: 100%; padding: 8px; margin-top: 5px; background: #3a3a3a; color: #e1e5e9; border: 1px solid #4a4a4a; border-radius: 4px;">
+                            <option value="USD">USD</option>
+                            <option value="EUR">EUR</option>
+                            <option value="INR">INR</option>
+                            <option value="TRY">TRY</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div style="display: flex; gap: 15px; margin-bottom: 15px;">
+                    <div style="flex: 1;">
+                        <label>Frequency:</label>
+                        <select id="recurringFrequency" style="width: 100%; padding: 8px; margin-top: 5px; background: #3a3a3a; color: #e1e5e9; border: 1px solid #4a4a4a; border-radius: 4px;">
+                            <option value="weekly">Weekly</option>
+                            <option value="monthly">Monthly</option>
+                            <option value="quarterly">Quarterly</option>
+                            <option value="yearly">Yearly</option>
+                        </select>
+                    </div>
+                    <div style="flex: 1;">
+                        <label>Start Date:</label>
+                        <input type="date" id="recurringStartDate" required style="width: 100%; padding: 8px; margin-top: 5px; background: #3a3a3a; color: #e1e5e9; border: 1px solid #4a4a4a; border-radius: 4px;">
+                    </div>
+                </div>
+
+                <div style="margin-bottom: 15px;">
+                    <label id="accountLabel">Account:</label>
+                    <select id="recurringAccount" required style="width: 100%; padding: 8px; margin-top: 5px; background: #3a3a3a; color: #e1e5e9; border: 1px solid #4a4a4a; border-radius: 4px;">
+                        <!-- Will be populated by JavaScript -->
+                    </select>
+                </div>
+
+                <div style="margin-bottom: 20px;" id="categoryDiv" style="display: none;">
+                    <label>Category:</label>
+                    <select id="recurringCategory" style="width: 100%; padding: 8px; margin-top: 5px; background: #3a3a3a; color: #e1e5e9; border: 1px solid #4a4a4a; border-radius: 4px;">
+                        <option value="general">General</option>
+                        <option value="housing">Housing</option>
+                        <option value="utilities">Utilities</option>
+                        <option value="food">Food</option>
+                        <option value="transportation">Transportation</option>
+                        <option value="insurance">Insurance</option>
+                        <option value="entertainment">Entertainment</option>
+                        <option value="healthcare">Healthcare</option>
+                        <option value="taxes">Taxes</option>
+                        <option value="other">Other</option>
+                    </select>
+                </div>
+
+                <div style="margin-bottom: 20px;">
+                    <label>Description:</label>
+                    <textarea id="recurringDescription" rows="2" style="width: 100%; padding: 8px; margin-top: 5px; background: #3a3a3a; color: #e1e5e9; border: 1px solid #4a4a4a; border-radius: 4px; resize: vertical;"></textarea>
+                </div>
+
+                <div style="text-align: right; gap: 10px; display: flex; justify-content: flex-end;">
+                    <button type="button" onclick="hideRecurringModal()" style="background: #6c757d; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer;">Cancel</button>
+                    <button type="submit" style="background: #52a963; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer;">Add</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        let currentRecurringType = '';
+        let recurringTransactions = { income: [], expenses: [] };
+        let accounts = [];
+
+        // Load recurring transactions and accounts on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            loadRecurringTransactions();
+            loadAccounts();
+        });
+
+        function loadAccounts() {
+            // Extract accounts from the savings data already available
+            fetch('/api/portfolio')
+                .then(response => response.json())
+                .then(data => {
+                    accounts = data.savings || [];
+                    populateAccountDropdown();
+                })
+                .catch(error => console.error('Error loading accounts:', error));
+        }
+
+        function populateAccountDropdown() {
+            const accountSelect = document.getElementById('recurringAccount');
+            accountSelect.innerHTML = '';
+            
+            accounts.forEach(account => {
+                const option = document.createElement('option');
+                option.value = account.id;
+                option.textContent = `${account.name} - ${account.institution} (${account.currency})`;
+                accountSelect.appendChild(option);
+            });
+        }
+
+        function loadRecurringTransactions() {
+            fetch('/api/recurring')
+                .then(response => response.json())
+                .then(data => {
+                    recurringTransactions = data;
+                    displayRecurringIncome(data.income || []);
+                    displayRecurringExpenses(data.expenses || []);
+                })
+                .catch(error => {
+                    console.error('Error loading recurring transactions:', error);
+                    document.getElementById('recurringIncomeList').innerHTML = '<div style="padding: 30px; text-align: center; color: #e07a7a;">Error loading recurring income</div>';
+                    document.getElementById('recurringExpensesList').innerHTML = '<div style="padding: 30px; text-align: center; color: #e07a7a;">Error loading recurring expenses</div>';
+                });
+        }
+
+        function displayRecurringIncome(income) {
+            const container = document.getElementById('recurringIncomeList');
+            
+            if (income.length === 0) {
+                container.innerHTML = '<div style="padding: 30px; text-align: center; color: #9ca3af;"><div style="font-size: 3em; margin-bottom: 10px;">💰</div><div>No recurring income</div><small>Set up salary, dividends, etc.</small></div>';
+                return;
+            }
+
+            const table = document.createElement('table');
+            table.className = 'category-table';
+            table.innerHTML = `
+                <thead>
+                    <tr>
+                        <th style="width: 30px;"></th>
+                        <th style="width: 30px;"></th>
+                        <th>Name</th>
+                        <th>Amount</th>
+                        <th>Frequency</th>
+                        <th>Next Due</th>
+                        <th>Account</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${income.map(item => `
+                        <tr>
+                            <td>
+                                <button class="btn btn-small danger" onclick="deleteRecurringTransaction('income', '${item.id}')" style="padding: 4px 8px; font-size: 12px;" title="Delete">✕</button>
+                            </td>
+                            <td>
+                                <button class="btn btn-small" onclick="editRecurringTransaction('income', '${item.id}')" style="padding: 4px 8px; font-size: 12px;" title="Edit">✏️</button>
+                            </td>
+                            <td><strong>${item.name}</strong></td>
+                            <td>${item.amount} ${item.currency}</td>
+                            <td>${item.frequency}</td>
+                            <td>${item.next_due_date}</td>
+                            <td><small>${item.target_account_name || 'Unknown'}</small></td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            `;
+            container.innerHTML = '';
+            container.appendChild(table);
+        }
+
+        function displayRecurringExpenses(expenses) {
+            const container = document.getElementById('recurringExpensesList');
+            
+            if (expenses.length === 0) {
+                container.innerHTML = '<div style="padding: 30px; text-align: center; color: #9ca3af;"><div style="font-size: 3em; margin-bottom: 10px;">💸</div><div>No recurring expenses</div><small>Set up rent, utilities, etc.</small></div>';
+                return;
+            }
+
+            const table = document.createElement('table');
+            table.className = 'category-table';
+            table.innerHTML = `
+                <thead>
+                    <tr>
+                        <th style="width: 30px;"></th>
+                        <th style="width: 30px;"></th>
+                        <th>Name</th>
+                        <th>Amount</th>
+                        <th>Frequency</th>
+                        <th>Next Due</th>
+                        <th>Account</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${expenses.map(item => `
+                        <tr>
+                            <td>
+                                <button class="btn btn-small danger" onclick="deleteRecurringTransaction('expense', '${item.id}')" style="padding: 4px 8px; font-size: 12px;" title="Delete">✕</button>
+                            </td>
+                            <td>
+                                <button class="btn btn-small" onclick="editRecurringTransaction('expense', '${item.id}')" style="padding: 4px 8px; font-size: 12px;" title="Edit">✏️</button>
+                            </td>
+                            <td><strong>${item.name}</strong></td>
+                            <td>${item.amount} ${item.currency}</td>
+                            <td>${item.frequency}</td>
+                            <td>${item.next_due_date}</td>
+                            <td><small>${item.source_account_name || 'Unknown'}</small></td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            `;
+            container.innerHTML = '';
+            container.appendChild(table);
+        }
+
+        function showAddRecurringForm(type) {
+            currentRecurringType = type;
+            document.getElementById('modalTitle').textContent = `Add Recurring ${type === 'income' ? 'Income' : 'Expense'}`;
+            document.getElementById('accountLabel').textContent = type === 'income' ? 'Target Account:' : 'Source Account:';
+            
+            // Show/hide category field for expenses
+            const categoryDiv = document.getElementById('categoryDiv');
+            if (type === 'expense') {
+                categoryDiv.style.display = 'block';
+            } else {
+                categoryDiv.style.display = 'none';
+            }
+            
+            // Reset form
+            document.getElementById('recurringForm').reset();
+            
+            // Set default start date to today
+            document.getElementById('recurringStartDate').value = new Date().toISOString().split('T')[0];
+            
+            document.getElementById('recurringModal').style.display = 'flex';
+        }
+
+        function hideRecurringModal() {
+            document.getElementById('recurringModal').style.display = 'none';
+        }
+
+        // Handle recurring form submission
+        document.getElementById('recurringForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const formData = {
+                name: document.getElementById('recurringName').value,
+                amount: parseFloat(document.getElementById('recurringAmount').value),
+                currency: document.getElementById('recurringCurrency').value,
+                frequency: document.getElementById('recurringFrequency').value,
+                start_date: document.getElementById('recurringStartDate').value,
+                description: document.getElementById('recurringDescription').value
+            };
+
+            if (currentRecurringType === 'income') {
+                formData.target_account_id = document.getElementById('recurringAccount').value;
+            } else {
+                formData.source_account_id = document.getElementById('recurringAccount').value;
+                formData.category = document.getElementById('recurringCategory').value;
+            }
+
+            const endpoint = `/api/recurring/${currentRecurringType}/add`;
+            
+            fetch(endpoint, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(formData)
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.ok) {
+                    hideRecurringModal();
+                    loadRecurringTransactions();
+                } else {
+                    alert('Error adding recurring transaction: ' + data.error);
+                }
+            })
+            .catch(error => {
+                alert('Error adding recurring transaction: ' + error);
+            });
+        });
+
+        function deleteRecurringTransaction(type, id) {
+            if (confirm(`Are you sure you want to delete this recurring ${type}?`)) {
+                fetch('/api/recurring/delete', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        type: type,
+                        id: id
+                    })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.ok) {
+                        loadRecurringTransactions();
+                    } else {
+                        alert('Error deleting transaction: ' + data.error);
+                    }
+                })
+                .catch(error => {
+                    alert('Error deleting transaction: ' + error);
+                });
+            }
+        }
+
+        function editRecurringTransaction(type, id) {
+            // TODO: Implement edit functionality for recurring transactions
+            alert(`Edit recurring ${type} ${id} - Feature coming soon!`);
+        }
     </script>
 </body>
 </html>
