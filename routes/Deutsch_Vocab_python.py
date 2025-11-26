@@ -278,7 +278,7 @@ level_options = vocab_df['Level'].dropna().unique()
 # Load progress on startup
 load_progress()
 
-def update_vocab_csv(english_word, old_german, old_artikel, new_german, new_english, new_artikel, level):
+def update_vocab_csv(english_word, old_german, old_artikel, old_beispielsatz, new_german, new_english, new_artikel, new_beispielsatz, level):
     """Update the vocab.csv file with corrected values"""
     global vocab_df
     try:
@@ -315,6 +315,7 @@ def update_vocab_csv(english_word, old_german, old_artikel, new_german, new_engl
         normalized_english = normalize_string(english_word)
         normalized_old_german = normalize_string(old_german)
         normalized_old_artikel = normalize_artikel(old_artikel)
+        normalized_old_beispielsatz = normalize_string(old_beispielsatz)
         
         # Create mask with normalized comparisons
         mask = (
@@ -366,6 +367,9 @@ def update_vocab_csv(english_word, old_german, old_artikel, new_german, new_engl
             if normalize_artikel(new_artikel) != normalized_old_artikel:  # Allow empty string to remove artikel
                 vocab_df.loc[mask, 'Artikel'] = new_artikel if new_artikel else None
                 print(f"Updated Artikel: {old_artikel} -> {new_artikel}")
+            if 'Beispielsatz' in vocab_df.columns and normalize_string(new_beispielsatz) != normalized_old_beispielsatz:
+                vocab_df.loc[mask, 'Beispielsatz'] = new_beispielsatz if new_beispielsatz else None
+                print(f"Updated Beispielsatz: {old_beispielsatz} -> {new_beispielsatz}")
                 
             # Save back to CSV
             vocab_df.to_csv(csv_path, index=False)
@@ -493,19 +497,25 @@ def deutsch_vocab():
                 corrected_german = request.form.get('corrected_german', '').strip()
                 corrected_english = request.form.get('corrected_english', '').strip()
                 corrected_artikel = request.form.get('corrected_artikel', '').strip()
+                corrected_beispielsatz = request.form.get('corrected_beispielsatz', '').strip()
                 
-                if is_correction and (corrected_german or corrected_english or corrected_artikel):
+                if is_correction and (corrected_german or corrected_english or corrected_artikel or corrected_beispielsatz):
+                    # Get current beispielsatz for comparison
+                    current_beispielsatz = request.form.get('beispielsatz', '').strip()
+                    
                     # Handle CSV correction submission
                     correction_details = {
                         'original': {
                             'german': correct_deutsch,
                             'english': english_word,
-                            'artikel': artikel
+                            'artikel': artikel,
+                            'beispielsatz': current_beispielsatz
                         },
                         'corrected': {
                             'german': corrected_german or correct_deutsch,
                             'english': corrected_english or english_word,
-                            'artikel': corrected_artikel if corrected_artikel else artikel
+                            'artikel': corrected_artikel if corrected_artikel else artikel,
+                            'beispielsatz': corrected_beispielsatz if corrected_beispielsatz else current_beispielsatz
                         }
                     }
                     
@@ -514,9 +524,11 @@ def deutsch_vocab():
                         english_word=english_word,
                         old_german=correct_deutsch,
                         old_artikel=artikel,
+                        old_beispielsatz=current_beispielsatz,
                         new_german=corrected_german,
                         new_english=corrected_english,
                         new_artikel=corrected_artikel,
+                        new_beispielsatz=corrected_beispielsatz,
                         level=word_level
                     )
                     
@@ -744,12 +756,28 @@ def deutsch_vocab():
 
         # Don't display 'nan' if Artikel is blank
         artikel_display = artikel if artikel else ''
+        
+        # Get the Beispielsatz for this word from the CSV
+        beispielsatz = ''
+        try:
+            if 'Beispielsatz' in vocab_df.columns:
+                mask = (vocab_df['Level'] == word_level) & (vocab_df['Deutsch'] == deutsch_word)
+                artik_series = vocab_df['Artikel'].fillna('').astype(str)
+                mask = mask & (artik_series == (artikel if artikel else ''))
+                row = vocab_df[mask]
+                if not row.empty:
+                    beispielsatz_val = row.iloc[0].get('Beispielsatz')
+                    if pd.notna(beispielsatz_val):
+                        beispielsatz = str(beispielsatz_val)
+        except Exception:
+            beispielsatz = ''
 
         # Get stats for progress display
         return render_template('Deutsch_Vocab_html.html', 
                              english_word=english_word, 
                              correct_deutsch=deutsch_word, 
-                             artikel=artikel_display, 
+                             artikel=artikel_display,
+                             beispielsatz=beispielsatz,  # Pass current Beispielsatz
                              word_level=word_level,  # Pass the specific level this word is from
                              selected_levels=selected_levels,  # Pass list of selected levels
                              levels_display=', '.join(selected_levels),  # For display

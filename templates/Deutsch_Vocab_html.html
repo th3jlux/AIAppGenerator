@@ -1107,6 +1107,7 @@
                         
                         <input type="hidden" name="correct_deutsch" value="{{ correct_deutsch }}">
                         <input type="hidden" name="artikel" value="{{ artikel }}">
+                        <input type="hidden" name="beispielsatz" value="{{ beispielsatz }}">
                         <input type="hidden" name="word_level" value="{{ word_level }}">
                         {% for level in selected_levels %}
                             <input type="hidden" name="levels" value="{{ level }}">
@@ -1166,6 +1167,7 @@
                                 <div class="current-value"><strong>English:</strong> <span id="current-english"></span></div>
                                 <div class="current-value"><strong>German:</strong> <span id="current-german"></span></div>
                                 <div class="current-value"><strong>Artikel:</strong> <span id="current-artikel"></span></div>
+                                <div class="current-value"><strong>Beispielsatz:</strong> <span id="current-beispielsatz"></span></div>
                             </div>
                             
                             <div class="correction-fields">
@@ -1190,6 +1192,12 @@
                                         <option value="das">das (neuter)</option>
                                         <option value="">No artikel</option>
                                     </select>
+                                </div>
+                                
+                                <div class="correction-field">
+                                    <label for="correction-beispielsatz">Beispielsatz (Example Sentence)</label>
+                                    <textarea class="correction-input" id="correction-beispielsatz" 
+                                              rows="3" placeholder="Enter an example sentence... (can be left empty)"></textarea>
                                 </div>
                             </div>
                             
@@ -1887,9 +1895,10 @@
             const correctedGerman = document.getElementById('correction-german').value.trim();
             const correctedEnglish = document.getElementById('correction-english').value.trim();
             const correctedArtikel = document.getElementById('correction-artikel').value.trim();
+            const correctedBeispielsatz = document.getElementById('correction-beispielsatz').value.trim();
             
             // Check if at least one field has a value
-            if (!correctedGerman && !correctedEnglish && !correctedArtikel) {
+            if (!correctedGerman && !correctedEnglish && !correctedArtikel && !correctedBeispielsatz) {
                 alert('Please fill in at least one field to make a correction.');
                 // Return focus to main input after alert
                 document.getElementById('user-input').focus();
@@ -1927,10 +1936,20 @@
                 document.getElementById('vocab-form').appendChild(artikelField);
             }
             
+            let beispielsatzField = document.getElementById('corrected-beispielsatz-field');
+            if (!beispielsatzField) {
+                beispielsatzField = document.createElement('input');
+                beispielsatzField.type = 'hidden';
+                beispielsatzField.name = 'corrected_beispielsatz';
+                beispielsatzField.id = 'corrected-beispielsatz-field';
+                document.getElementById('vocab-form').appendChild(beispielsatzField);
+            }
+            
             // Set the values
             germanField.value = correctedGerman;
             englishField.value = correctedEnglish;
             artikelField.value = correctedArtikel;
+            beispielsatzField.value = correctedBeispielsatz;
             
             // Submit the correction
             document.getElementById('vocab-form').dispatchEvent(new Event('submit'));
@@ -1942,20 +1961,24 @@
             const currentGerman = document.querySelector('input[name="correct_deutsch"]').value;
             const currentEnglish = document.querySelector('input[name="english_word"]').value;
             const currentArtikel = document.querySelector('input[name="artikel"]').value;
+            const currentBeispielsatz = document.querySelector('input[name="beispielsatz"]').value;
             
             // Handle empty/None artikel properly
             const displayArtikel = currentArtikel && currentArtikel !== 'None' ? currentArtikel : '';
             const displayGermanFull = displayArtikel ? `${displayArtikel} ${currentGerman}` : currentGerman;
+            const displayBeispielsatz = currentBeispielsatz || '(empty)';
             
             // Update current values display
             document.getElementById('current-german').textContent = displayGermanFull;
             document.getElementById('current-english').textContent = currentEnglish;
             document.getElementById('current-artikel').textContent = displayArtikel || 'None';
+            document.getElementById('current-beispielsatz').textContent = displayBeispielsatz;
             
             // Pre-fill the correction fields with current values
             document.getElementById('correction-german').value = currentGerman;
             document.getElementById('correction-english').value = currentEnglish;
             document.getElementById('correction-artikel').value = displayArtikel; // Use empty string instead of 'None'
+            document.getElementById('correction-beispielsatz').value = currentBeispielsatz;
             
             // Show the interface
             document.getElementById('correction-interface').style.display = 'block';
@@ -1969,6 +1992,7 @@
             document.getElementById('correction-german').value = '';
             document.getElementById('correction-english').value = '';
             document.getElementById('correction-artikel').value = '';
+            document.getElementById('correction-beispielsatz').value = '';
         }
 
         function insertUmlaut(char) {
@@ -2094,7 +2118,7 @@
                             correctionFlag.value = 'false';
                             
                             // Clean up any correction fields
-                            const fieldsToRemove = ['corrected-german-field', 'corrected-english-field', 'corrected-artikel-field'];
+                            const fieldsToRemove = ['corrected-german-field', 'corrected-english-field', 'corrected-artikel-field', 'corrected-beispielsatz-field'];
                             fieldsToRemove.forEach(id => {
                                 const field = document.getElementById(id);
                                 if (field) field.remove();
