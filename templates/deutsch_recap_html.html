@@ -1,0 +1,392 @@
+
+{% extends "base.html" %}
+{% block content %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Deutsch Recap</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+            color: #333;
+        }
+        
+        .container {
+            max-width: 1200px;
+            width: 100%;
+            margin: 0 auto;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            padding: 40px;
+            animation: fadeInUp 0.6s ease-out;
+        }
+
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        h1 {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+            text-align: center;
+            margin-bottom: 40px;
+            font-weight: 700;
+            font-size: 2.5em;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .filter-section {
+            background: #f8fafc;
+            padding: 25px;
+            border-radius: 15px;
+            margin-bottom: 30px;
+            border: 1px solid #e2e8f0;
+        }
+
+        .filter-form {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 25px;
+            align-items: start;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .range-group {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+        }
+
+        .range-group .form-group {
+            margin: 0;
+        }
+
+        .range-container {
+            grid-column: span 2;
+        }
+
+        .button-group {
+            grid-column: span 2;
+            justify-self: center;
+            margin-top: 10px;
+        }
+
+        @media (max-width: 768px) {
+            .range-container,
+            .button-group {
+                grid-column: span 1;
+            }
+        }
+
+        .filter-form label {
+            font-weight: 600;
+            color: #374151;
+            font-size: 14px;
+        }
+
+        .filter-form select, .filter-form input[type="number"] {
+            padding: 12px 16px;
+            border: 2px solid #e5e7eb;
+            border-radius: 10px;
+            font-size: 14px;
+            transition: all 0.3s ease;
+            background-color: white;
+        }
+
+        .filter-form select:focus, .filter-form input[type="number"]:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 8px;
+            padding: 12px 0;
+        }
+
+        .checkbox-group input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            accent-color: #667eea;
+        }
+
+        .table-container {
+            overflow-x: auto;
+            border-radius: 15px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        .word-table {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+        }
+
+        .word-table th {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            padding: 16px 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            font-size: 12px;
+            letter-spacing: 0.5px;
+        }
+
+        .word-table td {
+            padding: 16px 12px;
+            border-bottom: 1px solid #e5e7eb;
+            transition: background-color 0.2s ease;
+        }
+
+        .word-table tbody tr:hover {
+            background-color: #f8fafc;
+        }
+
+        .word-table tbody tr:nth-child(even) {
+            background-color: #fafafa;
+        }
+
+        .submit-btn {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 10px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 6px rgba(102, 126, 234, 0.3);
+        }
+
+        .submit-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .remove-btn {
+            background: linear-gradient(135deg, #ef4444, #dc2626);
+            color: white;
+            padding: 8px 16px;
+            border: none;
+            border-radius: 8px;
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 2px 4px rgba(239, 68, 68, 0.3);
+        }
+
+        .remove-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(239, 68, 68, 0.4);
+        }
+
+        .action-form {
+            display: inline;
+        }
+
+        .status-badge {
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 500;
+            text-transform: uppercase;
+        }
+
+        .status-easy {
+            background-color: #d1fae5;
+            color: #059669;
+        }
+
+        .status-hard {
+            background-color: #fecaca;
+            color: #dc2626;
+        }
+
+        .status-pending {
+            background-color: #fef3c7;
+            color: #d97706;
+        }
+
+        .level-badge {
+            background: linear-gradient(135deg, #60a5fa, #3b82f6);
+            color: white;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 20px;
+            }
+            
+            h1 {
+                font-size: 2em;
+            }
+            
+            .filter-form {
+                grid-template-columns: 1fr;
+            }
+            
+            .word-table th, .word-table td {
+                padding: 12px 8px;
+                font-size: 14px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1><i class="fas fa-graduation-cap"></i> Deutsch Recap</h1>
+        
+        <div class="filter-section">
+            <form method="POST" class="filter-form">
+                <div class="form-group">
+                    <label for="level"><i class="fas fa-layer-group"></i> Select Level:</label>
+                    <select name="level" id="level">
+                        <option value="">All Levels</option>
+                        {% for level in levels %}
+                        <option value="{{ level }}">{{ level }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="status"><i class="fas fa-check-circle"></i> Status Filter:</label>
+                    <select name="status" id="status">
+                        <option value="">All Status</option>
+                        <option value="correct">Correct</option>
+                        <option value="incorrect">Incorrect</option>
+                        <option value="notyetanswered">Not Yet Answered</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="difficulty"><i class="fas fa-fire"></i> Difficulty Filter:</label>
+                    <div class="checkbox-group">
+                        <input type="checkbox" name="difficulty" id="difficulty" value="hard">
+                        <label for="difficulty">Hard Words Only</label>
+                    </div>
+                </div>
+
+                <div class="form-group range-container">
+                    <label><i class="fas fa-exclamation-triangle"></i> Incorrect Count Range:</label>
+                    <div class="range-group">
+                        <div class="form-group">
+                            <label for="min_incorrect_count">Minimum:</label>
+                            <input type="number" name="min_incorrect_count" id="min_incorrect_count" min="0" value="0">
+                        </div>
+                        <div class="form-group">
+                            <label for="max_incorrect_count">Maximum:</label>
+                            <input type="number" name="max_incorrect_count" id="max_incorrect_count" min="0" placeholder="No limit">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-group button-group">
+                    <button type="submit" class="submit-btn">
+                        <i class="fas fa-filter"></i> Apply Filters
+                    </button>
+                </div>
+            </form>
+        </div>
+
+        <div class="table-container">
+            <table class="word-table">
+                <thead>
+                    <tr>
+                        <th><i class="fas fa-hashtag"></i></th>
+                        <th><i class="fas fa-tag"></i> Artikel</th>
+                        <th><i class="fas fa-language"></i> Deutsch</th>
+                        <th><i class="fas fa-globe"></i> English</th>
+                        <th><i class="fas fa-check-circle"></i> Status</th>
+                        <th><i class="fas fa-star"></i> Difficulty</th>
+                        <th><i class="fas fa-times"></i> Errors</th>
+                        <th><i class="fas fa-layer-group"></i> Level</th>
+                        <th><i class="fas fa-cog"></i> Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for word in words %}
+                    <tr>
+                        <td><strong>{{ loop.index }}</strong></td>
+                        <td><em>{{ word.artikel }}</em></td>
+                        <td><strong>{{ word.deutsch }}</strong></td>
+                        <td>{{ word.english }}</td>
+                        <td>
+                            <span class="status-badge {% if word.status == 'incorrect' %}status-hard{% elif word.status == 'notyetanswered' %}status-pending{% else %}status-easy{% endif %}">
+                                {% if word.status == 'notyetanswered' %}not yet answered{% else %}{{ word.status }}{% endif %}
+                            </span>
+                        </td>
+                        <td>
+                            {% if word.difficulty %}
+                                <span class="status-badge {% if word.difficulty == 'hard' %}status-hard{% else %}status-easy{% endif %}">
+                                    {{ word.difficulty }}
+                                </span>
+                            {% else %}
+                                <span class="status-badge status-easy">normal</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if word.incorrect_count > 0 %}
+                                <span style="color: #dc2626; font-weight: 600;">{{ word.incorrect_count }}</span>
+                            {% else %}
+                                <span style="color: #059669;">{{ word.incorrect_count }}</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <span class="level-badge">{{ word.level }}</span>
+                        </td>
+                        <td>
+                            <form method="POST" class="action-form">
+                                <input type="hidden" name="level_to_remove" value="{{ word.level }}">
+                                <input type="hidden" name="word_deutsch" value="{{ word.deutsch }}">
+                                <button type="submit" name="remove_word" class="remove-btn" title="Remove from hard list">
+                                    <i class="fas fa-trash-alt"></i> Remove
+                                </button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</body>
+</html>
+{% endblock %}

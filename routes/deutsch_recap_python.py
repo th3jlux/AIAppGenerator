@@ -38,8 +38,10 @@ def deutsch_recap_html():
         else:
             # Normal filtering
             level_filter = request.form.get('level')
+            status_filter = request.form.get('status')
             difficulty_filter = request.form.get('difficulty')
-            incorrect_count_filter = request.form.get('incorrect_count', type=int, default=0)
+            min_incorrect_count = request.form.get('min_incorrect_count', type=int, default=0)
+            max_incorrect_count = request.form.get('max_incorrect_count', type=int)
 
             # Filtering
             for level, words in data.items():
@@ -47,12 +49,28 @@ def deutsch_recap_html():
                     continue
 
                 for word in words:
+                    if status_filter and word.get('status') != status_filter:
+                        continue
+
                     if difficulty_filter == 'hard' and word.get('difficulty') != 'hard':
                         continue
 
-                    if word.get('incorrect_count', 0) <= incorrect_count_filter:
+                    # Range filtering for incorrect count
+                    word_incorrect_count = word.get('incorrect_count', 0)
+                    
+                    # Check minimum threshold
+                    if word_incorrect_count < min_incorrect_count:
+                        continue
+                    
+                    # Check maximum threshold (if provided)
+                    if max_incorrect_count is not None and word_incorrect_count > max_incorrect_count:
                         continue
 
                     filtered_words.append(word)
+    else:
+        # GET request - show all words by default
+        for level, words in data.items():
+            for word in words:
+                filtered_words.append(word)
 
     return render_template('deutsch_recap_html.html', words=filtered_words, levels=data.keys())
