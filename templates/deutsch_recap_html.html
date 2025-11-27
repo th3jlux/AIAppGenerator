@@ -269,6 +269,71 @@
             }
         }
     </style>
+    <script>
+        function toggleSelectAll() {
+            const checkboxes = document.querySelectorAll('.word-checkbox');
+            const selectAllBtn = event.target;
+            const allChecked = Array.from(checkboxes).every(cb => cb.checked);
+            
+            checkboxes.forEach(cb => {
+                cb.checked = !allChecked;
+            });
+            
+            // Update button text
+            if (allChecked) {
+                selectAllBtn.innerHTML = '<i class="fas fa-check-square"></i> Select All';
+            } else {
+                selectAllBtn.innerHTML = '<i class="fas fa-square"></i> Deselect All';
+            }
+            
+            updateSelectedCount();
+        }
+        
+        function updateSelectedCount() {
+            const checkedBoxes = document.querySelectorAll('.word-checkbox:checked');
+            const count = checkedBoxes.length;
+            const countSpan = document.getElementById('selectedCount');
+            
+            if (count === 0) {
+                countSpan.textContent = '0 selected';
+                countSpan.style.color = '#6b7280';
+            } else {
+                countSpan.textContent = `${count} selected`;
+                countSpan.style.color = '#059669';
+                countSpan.style.fontWeight = '600';
+            }
+            
+            // Update Select All button text
+            const selectAllBtn = document.querySelector('button[onclick="toggleSelectAll()"]');
+            const checkboxes = document.querySelectorAll('.word-checkbox');
+            const allChecked = Array.from(checkboxes).every(cb => cb.checked);
+            
+            if (allChecked && checkboxes.length > 0) {
+                selectAllBtn.innerHTML = '<i class="fas fa-square"></i> Deselect All';
+            } else {
+                selectAllBtn.innerHTML = '<i class="fas fa-check-square"></i> Select All';
+            }
+        }
+        
+        // Prevent form submission if no words are selected
+        document.addEventListener('DOMContentLoaded', function() {
+            document.getElementById('bulkRemoveForm').addEventListener('submit', function(e) {
+                const checkedBoxes = document.querySelectorAll('.word-checkbox:checked');
+                if (checkedBoxes.length === 0) {
+                    e.preventDefault();
+                    alert('Please select at least one word to remove.');
+                    return false;
+                }
+                
+                const confirmMsg = `Are you sure you want to remove ${checkedBoxes.length} word(s) from the hard list?`;
+                if (!confirm(confirmMsg)) {
+                    e.preventDefault();
+                    return false;
+                }
+            });
+        });
+    </script>
+    </style>
 </head>
 <body>
     <div class="container">
@@ -281,7 +346,7 @@
                     <select name="level" id="level">
                         <option value="">All Levels</option>
                         {% for level in levels %}
-                        <option value="{{ level }}">{{ level }}</option>
+                        <option value="{{ level }}" {% if level == current_level_filter %}selected{% endif %}>{{ level }}</option>
                         {% endfor %}
                     </select>
                 </div>
@@ -290,16 +355,16 @@
                     <label for="status"><i class="fas fa-check-circle"></i> Status Filter:</label>
                     <select name="status" id="status">
                         <option value="">All Status</option>
-                        <option value="correct">Correct</option>
-                        <option value="incorrect">Incorrect</option>
-                        <option value="notyetanswered">Not Yet Answered</option>
+                        <option value="correct" {% if 'correct' == current_status_filter %}selected{% endif %}>Correct</option>
+                        <option value="incorrect" {% if 'incorrect' == current_status_filter %}selected{% endif %}>Incorrect</option>
+                        <option value="notyetanswered" {% if 'notyetanswered' == current_status_filter %}selected{% endif %}>Not Yet Answered</option>
                     </select>
                 </div>
 
                 <div class="form-group">
                     <label for="difficulty"><i class="fas fa-fire"></i> Difficulty Filter:</label>
                     <div class="checkbox-group">
-                        <input type="checkbox" name="difficulty" id="difficulty" value="hard">
+                        <input type="checkbox" name="difficulty" id="difficulty" value="hard" {% if current_difficulty_filter == 'hard' %}checked{% endif %}>
                         <label for="difficulty">Hard Words Only</label>
                     </div>
                 </div>
@@ -309,11 +374,11 @@
                     <div class="range-group">
                         <div class="form-group">
                             <label for="min_incorrect_count">Minimum:</label>
-                            <input type="number" name="min_incorrect_count" id="min_incorrect_count" min="0" value="0">
+                            <input type="number" name="min_incorrect_count" id="min_incorrect_count" min="0" value="{{ current_min_incorrect }}">
                         </div>
                         <div class="form-group">
                             <label for="max_incorrect_count">Maximum:</label>
-                            <input type="number" name="max_incorrect_count" id="max_incorrect_count" min="0" placeholder="No limit">
+                            <input type="number" name="max_incorrect_count" id="max_incorrect_count" min="0" placeholder="No limit" value="{{ current_max_incorrect }}">
                         </div>
                     </div>
                 </div>
@@ -326,24 +391,49 @@
             </form>
         </div>
 
+        <!-- Bulk Actions Section -->
+        <div class="filter-section">
+            <form method="POST" id="bulkRemoveForm">
+                <!-- Preserve current filter state for bulk actions -->
+                <input type="hidden" name="current_level_filter" value="{{ current_level_filter }}">
+                <input type="hidden" name="current_status_filter" value="{{ current_status_filter }}">
+                <input type="hidden" name="current_difficulty_filter" value="{{ current_difficulty_filter }}">
+                <input type="hidden" name="current_min_incorrect" value="{{ current_min_incorrect }}">
+                <input type="hidden" name="current_max_incorrect" value="{{ current_max_incorrect }}">
+                
+                <div style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
+                    <button type="button" onclick="toggleSelectAll()" class="submit-btn" style="background: linear-gradient(135deg, #10b981, #059669);">
+                        <i class="fas fa-check-square"></i> Select All
+                    </button>
+                    <button type="submit" name="bulk_remove" class="remove-btn" style="padding: 12px 24px;">
+                        <i class="fas fa-trash-alt"></i> Remove Selected from Hard List
+                    </button>
+                    <span id="selectedCount" style="color: #6b7280; font-weight: 500;">0 selected</span>
+                </div>
+        </div>
+
         <div class="table-container">
             <table class="word-table">
                 <thead>
                     <tr>
+                        <th><i class="fas fa-check-square"></i></th>
                         <th><i class="fas fa-hashtag"></i></th>
                         <th><i class="fas fa-tag"></i> Artikel</th>
-                        <th><i class="fas fa-language"></i> Deutsch</th>
                         <th><i class="fas fa-globe"></i> English</th>
                         <th><i class="fas fa-check-circle"></i> Status</th>
                         <th><i class="fas fa-star"></i> Difficulty</th>
                         <th><i class="fas fa-times"></i> Errors</th>
                         <th><i class="fas fa-layer-group"></i> Level</th>
-                        <th><i class="fas fa-cog"></i> Action</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for word in words %}
                     <tr>
+                        <td>
+                            <input type="checkbox" name="selected_words" value="{{ word.level }}|{{ word.deutsch }}" 
+                                   onchange="updateSelectedCount()" class="word-checkbox"
+                                   style="width: 18px; height: 18px; accent-color: #667eea;">
+                        </td>
                         <td><strong>{{ loop.index }}</strong></td>
                         <td><em>{{ word.artikel }}</em></td>
                         <td><strong>{{ word.deutsch }}</strong></td>
@@ -354,13 +444,10 @@
                             </span>
                         </td>
                         <td>
-                            {% if word.difficulty %}
-                                <span class="status-badge {% if word.difficulty == 'hard' %}status-hard{% else %}status-easy{% endif %}">
-                                    {{ word.difficulty }}
-                                </span>
-                            {% else %}
-                                <span class="status-badge status-easy">normal</span>
-                            {% endif %}
+                            {% set word_difficulty = word.difficulty or 'normal' %}
+                            <span class="status-badge {% if word_difficulty == 'hard' %}status-hard{% else %}status-easy{% endif %}">
+                                {{ word_difficulty }}
+                            </span>
                         </td>
                         <td>
                             {% if word.incorrect_count > 0 %}
@@ -372,19 +459,12 @@
                         <td>
                             <span class="level-badge">{{ word.level }}</span>
                         </td>
-                        <td>
-                            <form method="POST" class="action-form">
-                                <input type="hidden" name="level_to_remove" value="{{ word.level }}">
-                                <input type="hidden" name="word_deutsch" value="{{ word.deutsch }}">
-                                <button type="submit" name="remove_word" class="remove-btn" title="Remove from hard list">
-                                    <i class="fas fa-trash-alt"></i> Remove
-                                </button>
-                            </form>
-                        </td>
                     </tr>
                     {% endfor %}
                 </tbody>
             </table>
+        </div>
+            </form>
         </div>
     </div>
 </body>
