@@ -10,17 +10,5 @@
         "href": "/Pdf_Merge_Split_html",
         "template": "Pdf_Merge_Split_html.html",
         "python_file": "Pdf_Merge_Split_python.py"
-    },
-    {
-        "bluePrint": "Deutsch_Vocab_blueprint",
-        "href": "/Deutsch_Vocab_html",
-        "template": "Deutsch_Vocab_html.html",
-        "python_file": "Deutsch_Vocab_python.py"
-    },
-    {
-        "bluePrint": "deutsch_recap_blueprint",
-        "href": "/deutsch_recap_html",
-        "template": "deutsch_recap_html.html",
-        "python_file": "deutsch_recap_python.py"
     }
 ]

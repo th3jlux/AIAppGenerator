@@ -171,3 +171,4 @@ data/networth.json
 data/progress.json
 .DS_Store
 git_skip_helper.py
+data/networth.json

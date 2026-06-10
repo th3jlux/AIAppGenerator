@@ -1,3 +1,5 @@
 openai
 flask
 requests
+yfinance
+PyPDF2
