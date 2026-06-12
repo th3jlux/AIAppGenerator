@@ -1,5 +1,6 @@
 openai
 flask
+python-dotenv
 requests
 yfinance
 PyPDF2

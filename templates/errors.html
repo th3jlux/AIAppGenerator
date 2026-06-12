@@ -1,22 +1,16 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Error</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            text-align: center;
-            margin-top: 50px;
-        }
-        .message {
-            font-size: 20px;
-            color: red;
-        }
-    </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Error · AI App Generator</title>
+    <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
-    <h1>Oops!</h1>
-    <p class="message">{{ message }}</p>
-    <a href="/">Return to Home</a>
+    <div class="error-page">
+        <h1>Oops!</h1>
+        <p>{{ message }}</p>
+        <a href="/"><button type="button">Return home</button></a>
+    </div>
 </body>
 </html>

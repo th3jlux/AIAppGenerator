@@ -2,229 +2,223 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=375">
-    <title>Home</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI App Generator</title>
     <link rel="stylesheet" href="/static/css/style.css">
-    <script>
-async function submitForm() {
-    const spinner = document.getElementById("spinner");
-    spinner.style.display = "block";
-
-    const title = document.getElementById('title').value;
-    const prompt = document.getElementById('prompt').value;
-    const selectedUtility = document.querySelector('input[name="selectedUtility"]:checked');
-
-    if (!title || !prompt) {
-        alert('Both fields are required!');
-        spinner.style.display = 'none';
-        return;
-    }
-
-    let jsonString;
-    if (!selectedUtility) {
-        jsonString = JSON.stringify({ title, prompt });
-    } else {
-        const selectedUtilityValue = selectedUtility.value;
-        jsonString = JSON.stringify({ title, prompt, selectedUtilityValue });
-    }
-
-    try {
-        const response = await fetch('/submit', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: jsonString,
-        });
-
-        if (!response.ok) {
-            const error = await response.json();
-            console.error('Error:', error);
-        } else {
-            const data = await response.json();
-            console.log('Success:', data);
-        }
-    } catch (error) {
-        console.error('Error:', error);
-    }
-
-    location.reload(); // Reload to reset the form and utilities
-    spinner.style.display = 'none';
-}
-
-async function deleteTool(linkTitle) {
-    const confirmed = confirm(`Are you sure you want to delete the tool: "${linkTitle}"?`);
-    if (!confirmed) return;
-
-    try {
-        const response = await fetch('/delete', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ title: linkTitle }),
-        });
-
-        if (response.ok) {
-            alert(`${linkTitle} deleted successfully!`);
-            location.reload(); // Refresh the page to reflect changes
-        } else {
-            const error = await response.json();
-            alert("Error: " + error.message);
-        }
-    } catch (error) {
-        console.error('Error:', error);
-        alert('An error occurred while deleting the tool.');
-    }
-}
-
-// Add event listeners for radio buttons
-document.addEventListener('DOMContentLoaded', () => {
-    document.querySelectorAll('input[name="selectedUtility"]').forEach(radio => {
-        radio.addEventListener('change', function () {
-            const titleInput = document.getElementById('title');
-            if (this.checked) {
-                const processedTitle = this.value.replace(/^\//, '').replace(/_html$/, '');
-                titleInput.value = processedTitle;
-                titleInput.readOnly = true; // Make the input readonly
-            }
-        });
-    });
-});
-
-function clearSelection() {
-    // Deselect any selected radio button
-    const selectedRadio = document.querySelector('input[name="selectedUtility"]:checked');
-    if (selectedRadio) {
-        selectedRadio.checked = false;
-    }
-
-    // Clear the Title textbox and make it editable
-    const titleInput = document.getElementById('title');
-    titleInput.value = '';
-    titleInput.readOnly = false;
-}
-
-function selectRadioAndOpenForm(index, title) {
-    // Select the radio button
-    const radioButton = document.getElementById(`utility-${index}`);
-    if (radioButton) {
-        radioButton.checked = true; // Programmatically select the radio button
-    }
-
-    // Manually trigger the onchange event
-    const event = new Event('change', { bubbles: true });
-    radioButton.dispatchEvent(event);
-
-    // Call openForm with the title
-    openForm(title);
-}
-
-async function openForm(linkTitle) {
-  try {
-    const trimmed = linkTitle.slice(1, -5); // Adjust the trimming logic if needed
-    const apiRoute = `/get_code?route_name=${trimmed}`;
-
-    const response = await fetch(apiRoute);
-
-    if (response.ok) {
-      const data = await response.json();
-
-      // Populate the Python code field
-      const python_text_field = document.getElementById('python_code');
-      python_text_field.value = data.python_code || "No Python code available.";
-
-      // Populate the HTML code field
-      const html_text_field = document.getElementById('html_code');
-      html_text_field.value = data.html_code || "No HTML code available.";
-    } else {
-      const error = await response.json();
-      alert(error.error || "Failed to retrieve code.");
-    }
-  } catch (error) {
-    console.error('Error:', error);
-    alert('An error occurred while fetching the code.');
-  }
-  document.getElementById("myForm").style.display = "block";
-}
-
-function closeForm() {
-  document.getElementById("myForm").style.display = "none";
-}
-    </script>
 </head>
 <body>
     <header>
         <h1>AI App Generator</h1>
+        <p class="tagline">Describe a tool. Get a working Flask app in seconds.</p>
     </header>
 
     <main>
-        <h2>Your Wish, My Command</h2>
-        <form onsubmit="event.preventDefault(); submitForm();">
-            <label for="title">Title:</label>
-            <input type="text" id="title" name="title" placeholder="Enter the title" required>
-            
-            <label for="prompt">Prompt:</label>
-            <textarea id="prompt" name="prompt" placeholder="Enter the prompt" required></textarea>
-            
-            <button type="submit">Submit</button>
-        </form>
-        <hr>
+        <!-- Generate / update -->
+        <section class="card">
+            <h2 class="section-title">Create a utility</h2>
 
+            <div id="update-banner" class="update-banner">
+                <span>Editing <strong id="update-name"></strong></span>
+                <button type="button" class="secondary" onclick="clearSelection()">New utility instead</button>
+            </div>
 
-        <div class="form-popup" id="myForm">
-          <form action="/action_page.php" class="form-container">
-            <table>
-                <tr>
-                    <td><label for="python_code"><b>Python Code</b></label></td>
-                    <td><textarea id="python_code" placeholder="python_code" name="python_code" required></textarea></td>
-                </tr>
-                <tr>
-                    <td><label for="html_code"><b>Html Code</b></label></td>
-                    <td><textarea id="html_code" placeholder="html_code" name="html_code" required></textarea></td>
-                </tr>
-            </table>
-            <button type="submit" class="btn">Update</button>
-            <button type="button" class="btn cancel" onclick="closeForm()">Close</button>
-          </form>
-        </div>
+            <form id="generate-form" onsubmit="event.preventDefault(); submitForm();">
+                <div>
+                    <label for="title">Title</label>
+                    <input type="text" id="title" name="title"
+                           placeholder="e.g. Word_Counter (letters, numbers, underscores)" required>
+                </div>
+                <div>
+                    <label for="prompt">Prompt</label>
+                    <textarea id="prompt" name="prompt"
+                              placeholder="Describe what the utility should do…" required></textarea>
+                </div>
+                <div class="form-actions">
+                    <button type="submit" id="submit-btn">Generate</button>
+                    <div id="status" class="status">
+                        <span class="dot"></span>
+                        <span id="status-text"></span>
+                    </div>
+                </div>
+            </form>
+        </section>
 
         {% if errors %}
         <div class="error-section">
-            <h3>Errors:</h3>
+            <h3>Some utilities failed to load</h3>
             <ul>
                 {% for error in errors %}
-                <li style="color: red;">{{ error }}</li>
+                <li>{{ error }}</li>
                 {% endfor %}
             </ul>
         </div>
         {% endif %}
 
-        <section class="utilities">
-            <h3>Utilities</h3>
-            <ul>
+        <!-- Utilities list -->
+        <section class="card">
+            <h2 class="section-title">Your utilities</h2>
+            {% if links %}
+            <ul class="utilities-grid">
                 {% for link in links %}
-                <li>
-                    <input type="radio" id="utility-{{ loop.index }}" name="selectedUtility" value="{{ link.title }}">
-                    <label for="utility-{{ loop.index }}">
-                        <a href="{{ link.href }}">{{ link.title }}</a>
-                    </label>
-                    <div class="buttons">
-                        <button class="show-code" type="button" onclick="selectRadioAndOpenForm('{{ loop.index }}', '{{ link.title }}')">Show Code</button>
-                        <button class="delete" type="button" onclick="deleteTool('{{ link.title }}')">×</button>
+                <li class="utility" data-href="{{ link.href }}">
+                    <a class="utility-name" href="{{ link.href }}">{{ link.title.lstrip('/').replace('_html','').replace('_',' ') }}</a>
+                    <div class="utility-actions">
+                        <button type="button" class="ghost" onclick="showCode('{{ link.href }}')">Show code</button>
+                        <button type="button" class="ghost" onclick="editUtility('{{ link.href }}')">Edit</button>
+                        <button type="button" class="danger" onclick="deleteTool('{{ link.href }}')">Delete</button>
                     </div>
                 </li>
                 {% endfor %}
             </ul>
-
-            <button type="button" id="clearSelectionButton" onclick="clearSelection()">Clear Selection</button>
+            {% else %}
+            <p class="empty-state">No utilities yet. Create your first one above.</p>
+            {% endif %}
         </section>
     </main>
-    <div id="spinner">
-        <div class="spinner-border"></div>
+
+    <footer>AI App Generator · runs locally</footer>
+
+    <!-- Show-code modal -->
+    <div class="modal-overlay" id="code-modal" onclick="if(event.target===this) closeModal()">
+        <div class="modal" role="dialog" aria-modal="true">
+            <div class="modal-header">
+                <h3 id="modal-title">Code</h3>
+                <button class="modal-close" onclick="closeModal()" aria-label="Close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="code-block">
+                    <label>Python</label>
+                    <pre id="modal-python"></pre>
+                </div>
+                <div class="code-block">
+                    <label>HTML</label>
+                    <pre id="modal-html"></pre>
+                </div>
+            </div>
+        </div>
     </div>
-    <footer>
-        &copy; 2024 Flask App
-    </footer>
+
+    <div id="toast-container"></div>
+
+    <script>
+    let selectedHref = null;
+
+    function toast(message, type = "") {
+        const container = document.getElementById("toast-container");
+        const el = document.createElement("div");
+        el.className = "toast " + type;
+        el.textContent = message;
+        container.appendChild(el);
+        setTimeout(() => el.remove(), 4000);
+    }
+
+    function setStatus(text, type = "") {
+        const status = document.getElementById("status");
+        document.getElementById("status-text").textContent = text;
+        status.className = "status active " + type;
+    }
+    function clearStatus() { document.getElementById("status").className = "status"; }
+
+    function hrefToRoute(href) {
+        return href.replace(/^\//, "").replace(/_html$/, "");
+    }
+
+    function editUtility(href) {
+        selectedHref = href;
+        const route = hrefToRoute(href);
+        const title = document.getElementById("title");
+        title.value = route;
+        title.readOnly = true;
+        document.getElementById("update-name").textContent = route.replace(/_/g, " ");
+        document.getElementById("update-banner").classList.add("active");
+        document.querySelectorAll(".utility").forEach(u =>
+            u.classList.toggle("selected", u.dataset.href === href));
+        document.getElementById("prompt").focus();
+        window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+
+    function clearSelection() {
+        selectedHref = null;
+        const title = document.getElementById("title");
+        title.value = "";
+        title.readOnly = false;
+        document.getElementById("update-banner").classList.remove("active");
+        document.querySelectorAll(".utility").forEach(u => u.classList.remove("selected"));
+    }
+
+    async function submitForm() {
+        const title = document.getElementById("title").value.trim();
+        const prompt = document.getElementById("prompt").value.trim();
+        if (!title || !prompt) { toast("Both fields are required.", "error"); return; }
+
+        const btn = document.getElementById("submit-btn");
+        btn.disabled = true;
+        setStatus(selectedHref ? "Updating utility…" : "Generating utility…");
+
+        const payload = { title, prompt };
+        if (selectedHref) payload.selectedUtilityValue = selectedHref;
+
+        try {
+            const res = await fetch("/submit", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload),
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                setStatus(data.error || "Something went wrong.", "error");
+                toast(data.error || "Generation failed.", "error");
+                btn.disabled = false;
+                return;
+            }
+            setStatus("Ready! Reloading…", "success");
+            toast("Utility ready: " + data.href, "success");
+            // Give the dev server a moment to hot-reload the new blueprint.
+            setTimeout(() => location.reload(), 1400);
+        } catch (err) {
+            setStatus("Network error.", "error");
+            toast("Network error: " + err.message, "error");
+            btn.disabled = false;
+        }
+    }
+
+    async function deleteTool(href) {
+        const route = hrefToRoute(href).replace(/_/g, " ");
+        if (!confirm(`Delete the utility "${route}"?`)) return;
+        try {
+            const res = await fetch("/delete", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ title: href }),
+            });
+            const data = await res.json();
+            if (res.ok) {
+                toast(`Deleted "${route}".`, "success");
+                setTimeout(() => location.reload(), 1000);
+            } else {
+                toast("Error: " + (data.message || "could not delete."), "error");
+            }
+        } catch (err) {
+            toast("Network error: " + err.message, "error");
+        }
+    }
+
+    async function showCode(href) {
+        const route = hrefToRoute(href);
+        try {
+            const res = await fetch(`/get_code?route_name=${encodeURIComponent(route)}`);
+            const data = await res.json();
+            if (!res.ok) { toast(data.error || "Failed to load code.", "error"); return; }
+            document.getElementById("modal-title").textContent = route.replace(/_/g, " ");
+            document.getElementById("modal-python").textContent = data.python_code || "No Python code.";
+            document.getElementById("modal-html").textContent = data.html_code || "No HTML code.";
+            document.getElementById("code-modal").classList.add("active");
+        } catch (err) {
+            toast("Network error: " + err.message, "error");
+        }
+    }
+    function closeModal() { document.getElementById("code-modal").classList.remove("active"); }
+    document.addEventListener("keydown", e => { if (e.key === "Escape") closeModal(); });
+    </script>
 </body>
 </html>
