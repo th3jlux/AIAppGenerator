@@ -1,96 +1,297 @@
-from flask import Flask, render_template, request, Blueprint, jsonify, redirect, url_for
+"""Net Worth Calculator route.
+
+Tracks savings, loans, real estate, stocks and crypto across multiple
+currencies, converts everything to a single display currency using live FX
+rates, and records a daily history so net worth can be charted over time.
+
+Design notes
+------------
+* Money is stored in each item's *native* currency plus a USD snapshot for
+  reference, but display values are always recomputed live from the native
+  amount using current FX rates, so nothing goes stale.
+* Prices are fetched via yfinance ``fast_info`` (fast, robust) and normalised
+  to USD, so a stock listed in EUR/GBP is not mis-summed as USD.
+* Writes are atomic (temp file + os.replace) and guarded by a lock, so a crash
+  or concurrent request can't corrupt the JSON.
+* GET endpoints are read-only. Mutations (price refresh, recurring processing,
+  add/update/delete) happen only on explicit POSTs or on a full page load.
+"""
+from flask import (
+    Flask, render_template, request, Blueprint, jsonify, redirect, url_for
+)
 import requests
 import yfinance as yf
 import json
 import os
-import locale
+import re
+import threading
 from pathlib import Path
+from datetime import datetime, timedelta, timezone
 
 My_Networth_blueprint = Blueprint('My_Networth_blueprint', __name__)
 
-# Path to the data file
-DATA_FILE = Path(__file__).parent.parent / 'data' / 'networth.json'
+# Path to the data files
+DATA_DIR = Path(__file__).parent.parent / 'data'
+DATA_FILE = DATA_DIR / 'networth.json'
+HISTORY_FILE = DATA_DIR / 'networth_history.json'
 
-from datetime import datetime, timedelta
+CURRENCY_API_URL = 'https://api.exchangerate-api.com/v4/latest/USD'
+PRICE_TTL_SECONDS = 60 * 60 * 24      # refresh security prices at most once/day
+FX_TTL_SECONDS = 60 * 60             # cache FX rates for an hour
+
+SUPPORTED_CURRENCIES = ('USD', 'EUR', 'INR', 'TRY', 'GBP')
+
+# Serialise all reads/writes of the data file to avoid corruption / races.
+_IO_LOCK = threading.RLock()
+
+# ---------------------------------------------------------------------------
+# Time helpers
+# ---------------------------------------------------------------------------
+
+def now_utc():
+    return datetime.now(timezone.utc)
+
+
+def now_iso():
+    """UTC, timezone-aware ISO timestamp (e.g. 2026-07-04T06:55:08.613+00:00)."""
+    return now_utc().isoformat()
+
+
+def parse_iso(value):
+    """Parse timestamps written by this module (or the legacy format)."""
+    if not value:
+        return None
+    try:
+        v = value.strip()
+        # Legacy "Z" suffix -> proper offset
+        if v.endswith('Z'):
+            v = v[:-1] + '+00:00'
+        # Normalise fractional seconds to 6 digits (older fromisoformat is picky)
+        m = re.match(r'^(.*T\d{2}:\d{2}:\d{2})\.(\d+)(.*)$', v)
+        if m:
+            frac = (m.group(2) + '000000')[:6]
+            v = f"{m.group(1)}.{frac}{m.group(3)}"
+        try:
+            dt = datetime.fromisoformat(v)
+        except ValueError:
+            # Very old format without timezone
+            dt = datetime.strptime(v[:19], "%Y-%m-%d %H:%M:%S")
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except Exception:
+        return None
+
+
+def needs_refresh(last_updated_str, ttl_seconds=PRICE_TTL_SECONDS):
+    """True if last_updated is missing or older than ttl_seconds."""
+    dt = parse_iso(last_updated_str)
+    if dt is None:
+        return True
+    return (now_utc() - dt).total_seconds() > ttl_seconds
+
+
+# ---------------------------------------------------------------------------
+# Currency helpers
+# ---------------------------------------------------------------------------
 
 def get_currency_symbol(currency):
-    """Map currency codes to their symbols"""
-    currency_symbols = {
-        'USD': '$',
-        'EUR': '€',
-        'INR': '₹',
-        'TRY': '₺'
-    }
-    return currency_symbols.get(currency, currency)
+    return {
+        'USD': '$', 'EUR': '€', 'INR': '₹',
+        'TRY': '₺', 'GBP': '£',
+    }.get(currency, f"{currency} ")
 
-def get_currency_locale(currency):
-    """Map currencies to their natural locales for number formatting"""
-    currency_locales = {
-        'INR': 'en_IN',  # Indian format (lakhs, crores): 1,23,456.78
-        'USD': 'en_US',  # US format: 123,456.78
-        'EUR': 'de_DE',  # European format: 123.456,78
-        'TRY': 'tr_TR'   # Turkish format: 123.456,78
-    }
-    return currency_locales.get(currency, 'en_US')
+
+def _group_thousands(digits, sep):
+    out = []
+    while len(digits) > 3:
+        out.insert(0, digits[-3:])
+        digits = digits[:-3]
+    out.insert(0, digits)
+    return sep.join(out)
+
+
+def _group_indian(digits):
+    """1234567 -> 12,34,567 (last three, then groups of two)."""
+    if len(digits) <= 3:
+        return digits
+    last3 = digits[-3:]
+    rest = digits[:-3]
+    parts = []
+    while len(rest) > 2:
+        parts.insert(0, rest[-2:])
+        rest = rest[:-2]
+    if rest:
+        parts.insert(0, rest)
+    return ','.join(parts) + ',' + last3
+
 
 def format_currency_value(value, currency):
-    """Format a number according to its currency's natural format"""
+    """Format a number in its currency's conventional grouping.
+
+    Locale-independent: does not rely on system locales being installed
+    (they usually aren't on slim Linux hosts, which is why the old
+    locale-based version silently fell back to US formatting for everything).
+    """
     try:
-        # Save current locale
-        old_locale = locale.getlocale()
-        # Set locale based on currency
-        locale.setlocale(locale.LC_ALL, get_currency_locale(currency))
-        # Format number
-        formatted = locale.format_string("%.2f", value, grouping=True)
-        # Restore original locale
-        locale.setlocale(locale.LC_ALL, old_locale)
-        return formatted
-    except Exception:
-        # Fallback to basic formatting if locale operations fail
-        return f"{value:,.2f}"
+        value = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+
+    negative = value < 0
+    value = abs(value)
+    int_part = str(int(round(value * 100)) // 100)
+    frac_part = f"{value:.2f}".split('.')[1]
+
+    if currency == 'INR':
+        grouped, dec = _group_indian(int_part), '.'
+    elif currency in ('EUR', 'TRY'):
+        grouped, dec = _group_thousands(int_part, '.'), ','
+    else:  # USD, GBP and anything else
+        grouped, dec = _group_thousands(int_part, ','), '.'
+
+    return ('-' if negative else '') + f"{grouped}{dec}{frac_part}"
 
 
-def load_portfolio():
-    """Load networth data from JSON file"""
-    default_portfolio = {
-        "schema_version": "1.0",
+# ---------------------------------------------------------------------------
+# FX rates (cached)
+# ---------------------------------------------------------------------------
+
+_FX_CACHE = {'rates': {}, 'fetched_at': None}
+
+
+def get_fx_rates(force=False):
+    """Return USD-based FX rates, cached for FX_TTL_SECONDS.
+
+    exchangerate-api returns ``rates`` where 1 USD = rates[X] units of X.
+    On failure we reuse the last successful cache (or an empty dict).
+    """
+    fetched = _FX_CACHE['fetched_at']
+    fresh = fetched and (now_utc() - fetched).total_seconds() < FX_TTL_SECONDS
+    if _FX_CACHE['rates'] and fresh and not force:
+        return _FX_CACHE['rates']
+    try:
+        resp = requests.get(CURRENCY_API_URL, timeout=10)
+        rates = resp.json().get('rates', {})
+        if rates:
+            rates.setdefault('USD', 1.0)
+            _FX_CACHE['rates'] = rates
+            _FX_CACHE['fetched_at'] = now_utc()
+    except Exception as e:
+        print(f"[FX] Could not refresh rates: {e}")
+    return _FX_CACHE['rates']
+
+
+def convert(amount, from_ccy, to_ccy, rates):
+    """Convert between two currencies using USD-based rates."""
+    if amount is None:
+        return 0.0
+    if from_ccy == to_ccy:
+        return amount
+    if not rates:
+        return amount
+    from_rate = rates.get(from_ccy)
+    to_rate = rates.get(to_ccy)
+    if not from_rate or not to_rate:
+        return amount  # can't convert; return as-is rather than silently zero
+    usd = amount / from_rate  # native -> USD
+    return usd * to_rate      # USD -> target
+
+
+def to_usd(amount, ccy, rates):
+    return convert(amount, ccy, 'USD', rates)
+
+
+# ---------------------------------------------------------------------------
+# Persistence
+# ---------------------------------------------------------------------------
+
+def default_portfolio():
+    return {
+        "schema_version": "1.1",
         "currency": "USD",
         "last_updated": None,
         "savings": [],
         "loans": [],
         "real_estate": [],
-        "investments": {
-            "stocks": [],
-            "cryptos": []
-        },
-        "recurring_transactions": {
-            "income": [],
-            "expenses": []
-        }
+        "investments": {"stocks": [], "cryptos": []},
+        "recurring_transactions": {"income": [], "expenses": []},
     }
-    
-    if not DATA_FILE.exists():
-        return default_portfolio
-    try:
-        with open(DATA_FILE, 'r') as f:
-            return json.load(f)
-    except Exception as e:
-        print(f"Error loading networth data: {e}")
-        return default_portfolio
+
+
+def _atomic_write(path: Path, data):
+    """Write JSON atomically: temp file in the same dir, then os.replace."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + '.tmp')
+    with open(tmp, 'w', encoding='utf-8') as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
+
+
+def load_portfolio():
+    with _IO_LOCK:
+        if not DATA_FILE.exists():
+            return default_portfolio()
+        try:
+            with open(DATA_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"Error loading networth data: {e}")
+            return default_portfolio()
+
 
 def save_portfolio(portfolio_data):
-    """Save networth data to JSON file"""
-    try:
-        DATA_FILE.parent.mkdir(exist_ok=True)
-        portfolio_data['last_updated'] = datetime.now().isoformat() + "Z"
-        with open(DATA_FILE, 'w') as f:
-            json.dump(portfolio_data, f, indent=2, ensure_ascii=False)
-    except Exception as e:
-        print(f"Error saving networth data: {e}")
+    with _IO_LOCK:
+        try:
+            portfolio_data['last_updated'] = now_iso()
+            _atomic_write(DATA_FILE, portfolio_data)
+        except Exception as e:
+            print(f"Error saving networth data: {e}")
 
-def get_next_id(category: str, existing_items: list) -> str:
-    """Generate next sequential ID for a category"""
-    existing_ids = [item.get('id', '') for item in existing_items]
+
+def load_history():
+    with _IO_LOCK:
+        if not HISTORY_FILE.exists():
+            return []
+        try:
+            with open(HISTORY_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                return data if isinstance(data, list) else []
+        except Exception as e:
+            print(f"Error loading history: {e}")
+            return []
+
+
+def record_snapshot(totals_usd):
+    """Append (or replace) today's net-worth snapshot, stored in USD.
+
+    At most one entry per calendar day so the history stays a clean daily
+    series regardless of how often the page is opened.
+    """
+    with _IO_LOCK:
+        history = load_history()
+        today = now_utc().date().isoformat()
+        entry = {
+            'date': today,
+            'timestamp': now_iso(),
+            'currency': 'USD',
+            'grand_total': round(totals_usd.get('grand_total', 0), 2),
+            'breakdown': {k: round(v, 2) for k, v in totals_usd.items()},
+        }
+        if history and history[-1].get('date') == today:
+            history[-1] = entry
+        else:
+            history.append(entry)
+        try:
+            _atomic_write(HISTORY_FILE, history)
+        except Exception as e:
+            print(f"Error saving history: {e}")
+
+
+def get_next_id(category, existing_items):
+    existing_ids = {item.get('id', '') for item in existing_items}
     counter = 1
     while True:
         new_id = f"{category}_{counter:03d}"
@@ -98,1319 +299,956 @@ def get_next_id(category: str, existing_items: list) -> str:
             return new_id
         counter += 1
 
-def calculate_next_due_date(current_date_str: str, frequency: str) -> str:
-    """Calculate next due date based on frequency"""
+
+# ---------------------------------------------------------------------------
+# Input validation
+# ---------------------------------------------------------------------------
+
+class ValidationError(Exception):
+    pass
+
+
+def req_float(body, key, minimum=None, allow_negative=True):
+    if key not in body or body[key] in (None, ''):
+        raise ValidationError(f"Missing required field: {key}")
+    try:
+        val = float(body[key])
+    except (TypeError, ValueError):
+        raise ValidationError(f"'{key}' must be a number")
+    if not allow_negative and val < 0:
+        raise ValidationError(f"'{key}' must not be negative")
+    if minimum is not None and val < minimum:
+        raise ValidationError(f"'{key}' must be at least {minimum}")
+    return val
+
+
+def opt_float(body, key, default=0.0):
+    if key not in body or body[key] in (None, ''):
+        return default
+    try:
+        return float(body[key])
+    except (TypeError, ValueError):
+        raise ValidationError(f"'{key}' must be a number")
+
+
+def req_currency(body, key='currency', default='USD'):
+    ccy = (body.get(key) or default).strip().upper()
+    return ccy
+
+
+def req_str(body, key, default=''):
+    return (body.get(key) or default).strip()
+
+
+# ---------------------------------------------------------------------------
+# Optional shared-secret guard (off by default)
+# ---------------------------------------------------------------------------
+
+def _api_token():
+    return os.environ.get('NETWORTH_API_TOKEN')
+
+
+def token_ok():
+    """True if no token is configured, or the request presents the right one."""
+    token = _api_token()
+    if not token:
+        return True
+    presented = request.headers.get('X-Networth-Token') or request.form.get('_token')
+    return presented == token
+
+
+def guard():
+    """Return a 401 response if the request fails the optional token check."""
+    if not token_ok():
+        return jsonify({'error': 'Unauthorized'}), 401
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Pricing
+# ---------------------------------------------------------------------------
+
+# Minor-unit currencies quoted by exchanges (e.g. LSE quotes pence, not pounds)
+_MINOR_UNITS = {'GBP': 'GBP', 'GBX': 'GBP', 'ZAC': 'ZAR', 'ILA': 'ILS'}
+
+
+def get_real_time_price(symbol, is_crypto=False):
+    """Return (price, currency) for a symbol, or (None, None) on failure.
+
+    Uses fast_info (much faster and more reliable than .info), falling back
+    to a 1-day history close if needed.
+    """
+    ticker_symbol = f"{symbol}-USD" if is_crypto else symbol
+    try:
+        ticker = yf.Ticker(ticker_symbol)
+        price = None
+        ccy = 'USD'
+        fi = getattr(ticker, 'fast_info', None)
+        if fi is not None:
+            for attr in ('last_price', 'lastPrice'):
+                try:
+                    price = fi[attr] if hasattr(fi, '__getitem__') else None
+                except (KeyError, TypeError):
+                    price = None
+                if price is None:
+                    price = getattr(fi, 'last_price', None)
+                if price is not None:
+                    break
+            try:
+                ccy = (fi['currency'] if hasattr(fi, '__getitem__') else None) \
+                    or getattr(fi, 'currency', None) or 'USD'
+            except (KeyError, TypeError):
+                ccy = getattr(fi, 'currency', None) or 'USD'
+        if price is None:
+            hist = ticker.history(period='1d')
+            if hist is not None and not hist.empty:
+                price = float(hist['Close'].iloc[-1])
+        if price is None:
+            return None, None
+        return float(price), (ccy or 'USD')
+    except Exception as e:
+        print(f"Error fetching price for {symbol}: {e}")
+        return None, None
+
+
+def price_to_usd(price, ccy, rates):
+    """Normalise a quoted price (possibly in a minor unit / foreign ccy) to USD."""
+    if price is None:
+        return None
+    ccy = (ccy or 'USD').upper()
+    if ccy in ('GBX', 'GBP') and ccy == 'GBX':
+        price /= 100.0
+        ccy = 'GBP'
+    elif ccy in _MINOR_UNITS and ccy not in ('GBP',):
+        price /= 100.0
+        ccy = _MINOR_UNITS[ccy]
+    if ccy == 'USD':
+        return price
+    return to_usd(price, ccy, rates)
+
+
+def update_portfolio_prices(stocks, cryptos, rates):
+    """Refresh market values (stored canonically in USD). Returns errors list."""
+    errors = []
+    for stock in stocks:
+        price, ccy = get_real_time_price(stock['symbol'], is_crypto=False)
+        usd = price_to_usd(price, ccy, rates)
+        if usd is not None:
+            stock['market_value'] = usd * stock['shares']
+            stock['price_currency'] = ccy
+            stock['last_updated'] = now_iso()
+        else:
+            errors.append(f"Could not update price for stock {stock['symbol']}")
+    for crypto in cryptos:
+        price, ccy = get_real_time_price(crypto['symbol'], is_crypto=True)
+        usd = price_to_usd(price, ccy, rates)
+        if usd is not None:
+            crypto['market_value'] = usd * crypto['amount']
+            crypto['last_updated'] = now_iso()
+        else:
+            errors.append(f"Could not update price for cryptocurrency {crypto['symbol']}")
+    return errors
+
+
+# ---------------------------------------------------------------------------
+# Equity / linking
+# ---------------------------------------------------------------------------
+
+def compute_equity_usd(property_item, loans, rates):
+    """Equity = market value minus the outstanding balance of linked loans."""
+    market_usd = to_usd(property_item['market_value'], property_item['currency'], rates)
+    linked_ids = set(property_item.get('mortgage_loan_ids', []))
+    owed = 0.0
+    for loan in loans:
+        if loan['id'] in linked_ids or loan.get('linked_property_id') == property_item['id']:
+            owed += to_usd(loan['outstanding_principal'], loan['currency'], rates)
+    return market_usd - owed
+
+
+# ---------------------------------------------------------------------------
+# Recurring transactions
+# ---------------------------------------------------------------------------
+
+def calculate_next_due_date(current_date_str, frequency):
     current_date = datetime.strptime(current_date_str, "%Y-%m-%d")
-    
     if frequency == "weekly":
         next_date = current_date + timedelta(weeks=1)
     elif frequency == "monthly":
-        # Add one month (approximate with 30 days, then adjust)
-        if current_date.month == 12:
-            next_date = current_date.replace(year=current_date.year + 1, month=1)
-        else:
-            try:
-                next_date = current_date.replace(month=current_date.month + 1)
-            except ValueError:
-                # Handle case where current day doesn't exist in next month (e.g., Jan 31 -> Feb 28)
-                next_date = current_date.replace(month=current_date.month + 1, day=28)
-    elif frequency == "quarterly":
-        # Add 3 months
-        month = current_date.month
-        year = current_date.year
-        month += 3
-        if month > 12:
-            year += month // 12
-            month = month % 12
-            if month == 0:
-                month = 12
-                year -= 1
+        month = current_date.month + 1
+        year = current_date.year + (1 if month > 12 else 0)
+        month = 1 if month > 12 else month
         try:
             next_date = current_date.replace(year=year, month=month)
         except ValueError:
-            # Handle day overflow (e.g., May 31 + 3 months = Aug 31, but some months don't have 31 days)
+            next_date = current_date.replace(year=year, month=month, day=28)
+    elif frequency == "quarterly":
+        month = current_date.month + 3
+        year = current_date.year
+        if month > 12:
+            year += (month - 1) // 12
+            month = ((month - 1) % 12) + 1
+        try:
+            next_date = current_date.replace(year=year, month=month)
+        except ValueError:
             next_date = current_date.replace(year=year, month=month, day=28)
     elif frequency == "yearly":
         try:
             next_date = current_date.replace(year=current_date.year + 1)
         except ValueError:
-            # Handle leap year edge case (Feb 29)
             next_date = current_date.replace(year=current_date.year + 1, day=28)
     else:
-        raise ValueError(f"Unsupported frequency: {frequency}")
-    
+        raise ValidationError(f"Unsupported frequency: {frequency}")
     return next_date.strftime("%Y-%m-%d")
 
-def is_transaction_due(due_date_str: str, last_processed_str: str = None) -> bool:
-    """Check if a recurring transaction is due for processing"""
-    today = datetime.now().date()
+
+def is_transaction_due(due_date_str, last_processed_str=None):
+    today = now_utc().date()
     due_date = datetime.strptime(due_date_str, "%Y-%m-%d").date()
-    
-    # Transaction is due if due_date <= today
     if due_date > today:
         return False
-    
-    # If already processed today, don't process again
     if last_processed_str:
         try:
-            last_processed = datetime.strptime(last_processed_str, "%Y-%m-%d").date()
-            if last_processed == today:
+            if datetime.strptime(last_processed_str, "%Y-%m-%d").date() == today:
                 return False
         except (ValueError, TypeError):
             pass
-    
     return True
 
+
 def process_recurring_transactions(portfolio_data):
-    """Process all due recurring transactions and update account balances"""
+    """Apply due recurring income/expenses to account balances. Idempotent per day."""
     recurring = portfolio_data.get('recurring_transactions', {'income': [], 'expenses': []})
-    
-    # Get currency conversion rates
-    try:
-        response = requests.get(CURRENCY_API_URL)
-        rates = response.json().get('rates', {})
-    except Exception:
-        rates = {}
-    
-    today = datetime.now().date().strftime("%Y-%m-%d")
-    transactions_processed = []
-    
-    # Process recurring income
-    for income in recurring.get('income', []):
-        if not income.get('is_active', True):
-            continue
-            
-        if is_transaction_due(income['next_due_date'], income.get('last_processed')):
-            # Find target account
-            target_account = None
-            for account in portfolio_data.get('savings', []):
-                if account['id'] == income['target_account_id']:
-                    target_account = account
-                    break
-            
-            if target_account:
-                # Convert income amount to account currency if needed
-                income_amount = income['amount']
-                if income['currency'] != target_account['currency']:
-                    # Convert income currency to USD first, then to account currency
-                    income_usd = income_amount / rates.get(income['currency'], 1) if income['currency'] != 'USD' else income_amount
-                    income_in_account_currency = income_usd * rates.get(target_account['currency'], 1)
-                else:
-                    income_in_account_currency = income_amount
-                
-                # Update account balance
-                target_account['balance'] += income_in_account_currency
-                target_account['balance_usd'] = target_account['balance'] / rates.get(target_account['currency'], 1) if target_account['currency'] != 'USD' else target_account['balance']
-                target_account['last_updated'] = datetime.now().isoformat() + "Z"
-                
-                # Update recurring income record
-                income['last_processed'] = today
-                income['next_due_date'] = calculate_next_due_date(income['next_due_date'], income['frequency'])
-                
-                transactions_processed.append({
-                    'type': 'income',
-                    'name': income['name'],
-                    'amount': income_amount,
-                    'currency': income['currency'],
-                    'account': target_account['name'],
-                    'date': today
-                })
-    
-    # Process recurring expenses
-    for expense in recurring.get('expenses', []):
-        if not expense.get('is_active', True):
-            continue
-            
-        if is_transaction_due(expense['next_due_date'], expense.get('last_processed')):
-            # Find source account
-            source_account = None
-            for account in portfolio_data.get('savings', []):
-                if account['id'] == expense['source_account_id']:
-                    source_account = account
-                    break
-            
-            if source_account:
-                # Convert expense amount to account currency if needed
-                expense_amount = expense['amount']
-                if expense['currency'] != source_account['currency']:
-                    # Convert expense currency to USD first, then to account currency
-                    expense_usd = expense_amount / rates.get(expense['currency'], 1) if expense['currency'] != 'USD' else expense_amount
-                    expense_in_account_currency = expense_usd * rates.get(source_account['currency'], 1)
-                else:
-                    expense_in_account_currency = expense_amount
-                
-                # Update account balance (subtract expense)
-                source_account['balance'] -= expense_in_account_currency
-                source_account['balance_usd'] = source_account['balance'] / rates.get(source_account['currency'], 1) if source_account['currency'] != 'USD' else source_account['balance']
-                source_account['last_updated'] = datetime.now().isoformat() + "Z"
-                
-                # Update recurring expense record
-                expense['last_processed'] = today
-                expense['next_due_date'] = calculate_next_due_date(expense['next_due_date'], expense['frequency'])
-                
-                transactions_processed.append({
-                    'type': 'expense',
-                    'name': expense['name'],
-                    'amount': expense_amount,
-                    'currency': expense['currency'],
-                    'account': source_account['name'],
-                    'date': today
-                })
-    
-    return transactions_processed
+    rates = get_fx_rates()
+    today = now_utc().date().strftime("%Y-%m-%d")
+    processed = []
+    accounts = {a['id']: a for a in portfolio_data.get('savings', [])}
 
-def usd_to_target(value_usd, target, rates=None, debug=False):
-    """Convert a USD value to target currency using provided rates.
-    
-    Args:
-        value_usd: Value in USD to convert
-        target: Target currency code (e.g., 'EUR', 'INR')
-        rates: Dictionary of currency conversion rates from USD
-        debug: Whether to print debug info about conversions
-    
-    Returns:
-        Converted value in target currency
-    """
-    if value_usd is None:
-        return 0
-    if not rates or target not in rates:
-        if debug:
-            print(f"[Currency Rates] Warning: No conversion rate found for {target}, using 1:1 ratio")
-        return value_usd
-    rate = rates.get(target, 1)
-    if debug:
-        print(f"[Currency Rates] Converting USD to {target} with rate {rate}")
-    return value_usd * rate
-
-CURRENCY_API_URL = 'https://api.exchangerate-api.com/v4/latest/USD'
-# How long (seconds) to consider stored prices fresh before refreshing (every 24 hours)
-PRICE_TTL_SECONDS = 60*60*24
-
-def needs_refresh(last_updated_str, ttl_seconds=PRICE_TTL_SECONDS):
-    """Return True if last_updated_str is None or older than ttl_seconds."""
-    if not last_updated_str:
-        return True
-    try:
-        last = datetime.strptime(last_updated_str, "%Y-%m-%d %H:%M:%S")
-        return (datetime.now() - last).total_seconds() > ttl_seconds
-    except Exception:
-        return True
-
-def get_real_time_price(symbol, is_crypto=False):
-    try:
-        # For crypto, append '-USD' to get the USD pair
-        ticker_symbol = f"{symbol}-USD" if is_crypto else symbol
-        ticker = yf.Ticker(ticker_symbol)
-        # Get the current market price
-        current_price = ticker.info.get('regularMarketPrice')
-        if current_price is None:
+    def apply(txn, sign):
+        acct = accounts.get(txn.get('target_account_id') or txn.get('source_account_id'))
+        if not acct:
             return None
-        return float(current_price)
-    except Exception as e:
-        print(f"Error fetching price for {symbol}: {str(e)}")
-        return None
+        amount_native = convert(txn['amount'], txn['currency'], acct['currency'], rates)
+        acct['balance'] += sign * amount_native
+        acct['balance_usd'] = to_usd(acct['balance'], acct['currency'], rates)
+        acct['last_updated'] = now_iso()
+        txn['last_processed'] = today
+        txn['next_due_date'] = calculate_next_due_date(txn['next_due_date'], txn['frequency'])
+        return {'type': 'income' if sign > 0 else 'expense', 'name': txn['name'],
+                'amount': txn['amount'], 'currency': txn['currency'],
+                'account': acct['name'], 'date': today}
 
-def update_portfolio_prices(stocks, cryptos):
-    """Update prices for all stocks and cryptos in the portfolio.
-    Store values in USD as the canonical stored amount.
-    Returns updated_stocks, updated_cryptos, errors
-    """
-    updated_stocks = []
-    updated_cryptos = []
-    errors = []
-
-    # Update stock prices
-    for stock in stocks:
-        symbol = stock['symbol']
-        quantity = stock['shares']
-        current_price = get_real_time_price(symbol, is_crypto=False)
-        if current_price is not None:
-            market_value = current_price * quantity
-            updated_stock = stock.copy()
-            updated_stock['market_value'] = market_value
-            updated_stock['last_updated'] = datetime.now().isoformat() + "Z"
-            updated_stocks.append(updated_stock)
-        else:
-            # Keep the old stored value if we can't fetch a new one
-            updated_stocks.append(stock)
-            errors.append(f"Could not update price for stock {symbol}")
-
-    # Update crypto prices
-    for crypto in cryptos:
-        symbol = crypto['symbol']
-        quantity = crypto['amount']
-        current_price = get_real_time_price(symbol, is_crypto=True)
-        if current_price is not None:
-            market_value = current_price * quantity
-            updated_crypto = crypto.copy()
-            updated_crypto['market_value'] = market_value
-            updated_crypto['last_updated'] = datetime.now().isoformat() + "Z"
-            updated_cryptos.append(updated_crypto)
-        else:
-            # Keep the old stored value if we can't fetch a new one
-            updated_cryptos.append(crypto)
-            errors.append(f"Could not update price for cryptocurrency {symbol}")
-
-    return updated_stocks, updated_cryptos, errors
+    for income in recurring.get('income', []):
+        if income.get('is_active', True) and is_transaction_due(income['next_due_date'], income.get('last_processed')):
+            r = apply(income, +1)
+            if r:
+                processed.append(r)
+    for expense in recurring.get('expenses', []):
+        if expense.get('is_active', True) and is_transaction_due(expense['next_due_date'], expense.get('last_processed')):
+            r = apply(expense, -1)
+            if r:
+                processed.append(r)
+    return processed
 
 
-@My_Networth_blueprint.route('/api/portfolio', methods=['GET'])
-def api_portfolio():
-    """Return the networth data as JSON. Refresh prices if stored data is stale (TTL)."""
-    errors = []
-    portfolio_data = load_portfolio()
-    
-    # Process recurring transactions first
-    try:
-        processed_transactions = process_recurring_transactions(portfolio_data)
-        if processed_transactions:
-            save_portfolio(portfolio_data)
-            # Add info about processed transactions to response
-            for transaction in processed_transactions:
-                errors.append(f"Processed {transaction['type']}: {transaction['name']} - {transaction['amount']} {transaction['currency']} for {transaction['account']}")
-    except Exception as e:
-        errors.append(f"Error processing recurring transactions: {e}")
-    
+# ---------------------------------------------------------------------------
+# Core: build the display payload (read-only, live conversion)
+# ---------------------------------------------------------------------------
+
+def build_payload(portfolio_data, display_currency, rates):
+    """Compute display + USD views of the whole portfolio. No side effects."""
     stocks = portfolio_data.get('investments', {}).get('stocks', [])
     cryptos = portfolio_data.get('investments', {}).get('cryptos', [])
     savings = portfolio_data.get('savings', [])
     loans = portfolio_data.get('loans', [])
     real_estate = portfolio_data.get('real_estate', [])
-    target_currency = portfolio_data.get('currency', 'USD')
 
-    # Check if we should refresh prices
-    if needs_refresh(portfolio_data.get('last_updated')):
-        try:
-            response = requests.get(CURRENCY_API_URL)
-            data = response.json()
-            currency_conversion = data['rates']
+    stocks_out, cryptos_out = [], []
+    stocks_usd = cryptos_usd = 0.0
+    for s in stocks:
+        usd = s['market_value']  # stored canonically in USD
+        stocks_usd += usd
+        stocks_out.append({'id': s['id'], 'symbol': s['symbol'], 'shares': s['shares'],
+                           'currency': s.get('price_currency', 'USD'),
+                           'market_value': round(convert(usd, 'USD', display_currency, rates), 2)})
+    for c in cryptos:
+        usd = c['market_value']
+        cryptos_usd += usd
+        cryptos_out.append({'id': c['id'], 'symbol': c['symbol'], 'amount': c['amount'],
+                            'currency': 'USD',
+                            'market_value': round(convert(usd, 'USD', display_currency, rates), 2)})
 
-            updated_stocks, updated_cryptos, price_errors = update_portfolio_prices(stocks, cryptos)
-            errors.extend(price_errors)
+    savings_out, savings_usd = [], 0.0
+    for a in savings:
+        usd = to_usd(a['balance'], a['currency'], rates)
+        savings_usd += usd
+        savings_out.append({'id': a['id'], 'name': a['name'], 'balance': a['balance'],
+                            'currency': a['currency'],
+                            'display_value': round(convert(a['balance'], a['currency'], display_currency, rates), 2),
+                            'institution': a.get('institution', ''),
+                            'account_type': a.get('account_type', 'checking')})
 
-            portfolio_data['investments']['stocks'] = updated_stocks
-            portfolio_data['investments']['cryptos'] = updated_cryptos
-            save_portfolio(portfolio_data)
+    loans_out, loans_usd = [], 0.0
+    for l in loans:
+        usd = to_usd(l['outstanding_principal'], l['currency'], rates)
+        loans_usd += usd
+        loans_out.append({'id': l['id'], 'name': l['name'],
+                          'outstanding_principal': l['outstanding_principal'], 'currency': l['currency'],
+                          'display_value': round(-convert(l['outstanding_principal'], l['currency'], display_currency, rates), 2),
+                          'interest_rate': l.get('interest_rate', 0), 'loan_type': l.get('loan_type', ''),
+                          'linked_property_id': l.get('linked_property_id'),
+                          'monthly_payment': l.get('monthly_payment')})
 
-            # reflect updated values
-            stocks = updated_stocks
-            cryptos = updated_cryptos
+    re_out, re_usd = [], 0.0
+    for p in real_estate:
+        market_usd = to_usd(p['market_value'], p['currency'], rates)
+        equity_usd = compute_equity_usd(p, loans, rates)
+        re_usd += market_usd
+        re_out.append({'id': p['id'], 'name': p['name'], 'market_value': p['market_value'],
+                       'currency': p['currency'],
+                       'display_value': round(convert(market_usd, 'USD', display_currency, rates), 2),
+                       'equity': round(convert(equity_usd, 'USD', display_currency, rates), 2),
+                       'property_type': p.get('property_type', ''), 'address': p.get('address', ''),
+                       'mortgage_loan_ids': p.get('mortgage_loan_ids', [])})
 
-        except Exception as e:
-            errors.append(f"Error refreshing prices: {e}")
+    def disp(usd):
+        return round(convert(usd, 'USD', display_currency, rates), 2)
 
-    # Determine requested display currency (query param overrides stored currency)
-    display_currency = request.args.get('currency') or portfolio_data.get('currency', 'USD')
+    net_cash_usd = savings_usd - loans_usd
+    grand_usd = stocks_usd + cryptos_usd + net_cash_usd + re_usd
 
-    # Fetch latest currency rates to convert values into display_currency
-    try:
-        resp = requests.get(CURRENCY_API_URL)
-        rates = resp.json().get('rates', {})
-    except Exception:
-        rates = {}
+    totals_usd = {'stocks': stocks_usd, 'cryptos': cryptos_usd, 'savings': savings_usd,
+                  'loans': -loans_usd, 'real_estate': re_usd, 'net_cash': net_cash_usd,
+                  'grand_total': grand_usd}
+    totals = {'stocks': disp(stocks_usd), 'cryptos': disp(cryptos_usd), 'savings': disp(savings_usd),
+              'loans': disp(-loans_usd), 'real_estate': disp(re_usd), 'net_cash': disp(net_cash_usd),
+              'grand_total': disp(grand_usd)}
 
-    # Convert values to display currency for payload
-    stocks_out = []
-    for stock in stocks:
-        converted_value = usd_to_target(stock['market_value'], display_currency, rates)
-        stocks_out.append({
-            'id': stock['id'],
-            'symbol': stock['symbol'],
-            'shares': stock['shares'],
-            'currency': stock['currency'],
-            'market_value': round(converted_value, 2)
-        })
+    lu = parse_iso(portfolio_data.get('last_updated'))
+    last_updated_display = lu.strftime("%Y-%m-%d %H:%M UTC") if lu else None
 
-    cryptos_out = []
-    for crypto in cryptos:
-        converted_value = usd_to_target(crypto['market_value'], display_currency, rates)
-        cryptos_out.append({
-            'id': crypto['id'],
-            'symbol': crypto['symbol'],
-            'amount': crypto['amount'],
-            'currency': crypto['currency'],
-            'market_value': round(converted_value, 2)
-        })
-
-    savings_out = []
-    for saving in savings:
-        if saving['currency'] == display_currency:
-            display_value = saving['balance']
-        else:
-            display_value = usd_to_target(saving['balance_usd'], display_currency, rates)
-        savings_out.append({
-            'id': saving['id'],
-            'name': saving['name'],
-            'balance': saving['balance'],
-            'currency': saving['currency'],
-            'display_value': round(display_value, 2),
-            'institution': saving.get('institution', ''),
-            'account_type': saving.get('account_type', 'checking')
-        })
-
-    loans_out = []
-    for loan in loans:
-        if loan['currency'] == display_currency:
-            display_value = -loan['outstanding_principal']  # Negative for display
-        else:
-            display_value = -usd_to_target(loan['outstanding_usd'], display_currency, rates)
-        loans_out.append({
-            'id': loan['id'],
-            'name': loan['name'],
-            'outstanding_principal': loan['outstanding_principal'],
-            'currency': loan['currency'],
-            'display_value': round(display_value, 2),
-            'interest_rate': loan.get('interest_rate', 0),
-            'loan_type': loan.get('loan_type', ''),
-            'linked_property_id': loan.get('linked_property_id'),
-            'monthly_payment': loan.get('monthly_payment', 0)
-        })
-
-    real_estate_out = []
-    for property in real_estate:
-        if property['currency'] == display_currency:
-            display_value = property['market_value']
-        else:
-            display_value = usd_to_target(property['market_value_usd'], display_currency, rates)
-        
-        # Calculate equity in display currency
-        equity_display = 0
-        if 'computed_equity' in property:
-            if property['currency'] == display_currency:
-                equity_display = property['computed_equity']
-            else:
-                equity_display = usd_to_target(property['computed_equity_usd'], display_currency, rates)
-        
-        real_estate_out.append({
-            'id': property['id'],
-            'name': property['name'],
-            'market_value': property['market_value'],
-            'currency': property['currency'],
-            'display_value': round(display_value, 2),
-            'equity': round(equity_display, 2),
-            'property_type': property.get('property_type', ''),
-            'address': property.get('address', ''),
-            'mortgage_loan_ids': property.get('mortgage_loan_ids', [])
-        })
-
-    # Calculate totals
-    total_stocks_worth = sum(item['market_value'] for item in stocks_out)
-    total_crypto_worth = sum(item['market_value'] for item in cryptos_out)
-    total_savings = sum(item['display_value'] for item in savings_out)
-    total_loans = sum(item['display_value'] for item in loans_out)  # Already negative
-    total_real_estate = sum(item['display_value'] for item in real_estate_out)
-    
-    net_cash = total_savings + total_loans  # loans are negative
-    grand_total_worth = total_stocks_worth + total_crypto_worth + net_cash + total_real_estate
-
-    # Format last_updated for display
-    lu = portfolio_data.get('last_updated')
-    if lu:
-        try:
-            # Handle both old format and new ISO format
-            if 'T' in lu and lu.endswith('Z'):
-                lu_dt = datetime.fromisoformat(lu.replace('Z', '+00:00'))
-            else:
-                lu_dt = datetime.strptime(lu, "%Y-%m-%d %H:%M:%S")
-            last_updated_display = lu_dt.strftime("%Y-%m-%d %H:%M")
-        except Exception:
-            last_updated_display = lu
-    else:
-        last_updated_display = None
-
-    payload = {
-        'stocks': stocks_out,
-        'cryptos': cryptos_out,
-        'savings': savings_out,
-        'loans': loans_out,
-        'real_estate': real_estate_out,
-        'totals': {
-            'stocks': total_stocks_worth,
-            'cryptos': total_crypto_worth,
-            'savings': total_savings,
-            'loans': total_loans,
-            'real_estate': total_real_estate,
-            'net_cash': net_cash,
-            'grand_total': grand_total_worth
-        },
-        'currency': display_currency,
-        'last_updated': last_updated_display,
-        'errors': errors
+    return {
+        'stocks': stocks_out, 'cryptos': cryptos_out, 'savings': savings_out,
+        'loans': loans_out, 'real_estate': re_out, 'totals': totals, 'totals_usd': totals_usd,
+        'currency': display_currency, 'last_updated': last_updated_display,
     }
+
+
+def resolve_currency():
+    req = (request.args.get('currency') or '').strip().upper()
+    if req in SUPPORTED_CURRENCIES:
+        return req
+    portfolio = None
+    return req if req else None
+
+
+# ---------------------------------------------------------------------------
+# JSON API
+# ---------------------------------------------------------------------------
+
+@My_Networth_blueprint.route('/api/portfolio', methods=['GET'])
+def api_portfolio():
+    """Read-only portfolio snapshot converted to the requested display currency."""
+    portfolio_data = load_portfolio()
+    display_currency = (request.args.get('currency') or portfolio_data.get('currency', 'USD')).upper()
+    rates = get_fx_rates()
+    payload = build_payload(portfolio_data, display_currency, rates)
+    payload['errors'] = []
+    payload.pop('totals_usd', None)
+    return jsonify(payload)
+
+
+@My_Networth_blueprint.route('/api/portfolio/history', methods=['GET'])
+def api_portfolio_history():
+    """Net-worth history (stored in USD) converted to the requested currency."""
+    display_currency = (request.args.get('currency') or 'USD').upper()
+    rates = get_fx_rates()
+    history = load_history()
+    series = [{
+        'date': h['date'],
+        'grand_total': round(convert(h.get('grand_total', 0), 'USD', display_currency, rates), 2),
+    } for h in history]
+    return jsonify({'currency': display_currency, 'history': series})
+
+
+@My_Networth_blueprint.route('/api/portfolio/refresh', methods=['POST'])
+def api_portfolio_refresh():
+    """Force-refresh security prices, record a snapshot, return the payload."""
+    denied = guard()
+    if denied:
+        return denied
+    portfolio_data = load_portfolio()
+    rates = get_fx_rates(force=True)
+    stocks = portfolio_data.get('investments', {}).get('stocks', [])
+    cryptos = portfolio_data.get('investments', {}).get('cryptos', [])
+    errors = update_portfolio_prices(stocks, cryptos, rates)
+    save_portfolio(portfolio_data)
+
+    display_currency = (request.args.get('currency') or portfolio_data.get('currency', 'USD')).upper()
+    payload = build_payload(portfolio_data, display_currency, rates)
+    record_snapshot(payload['totals_usd'])
+    payload.pop('totals_usd', None)
+    payload['errors'] = errors
     return jsonify(payload)
 
 
 @My_Networth_blueprint.route('/api/portfolio/delete', methods=['POST'])
 def api_portfolio_delete():
-    """Delete an entry from the portfolio. Expects JSON {category: 'stocks'|'cryptos'|'savings'|'loans'|'real_estate', id: str}"""
+    denied = guard()
+    if denied:
+        return denied
     try:
         body = request.get_json(force=True)
         category = body.get('category')
         item_id = body.get('id')
     except Exception as e:
         return jsonify({'error': f'Invalid request: {e}'}), 400
-
     if category not in ('stocks', 'cryptos', 'savings', 'loans', 'real_estate'):
         return jsonify({'error': 'Invalid category'}), 400
 
     portfolio_data = load_portfolio()
-    
-    # Find the correct array based on category
     if category in ('stocks', 'cryptos'):
         items = portfolio_data.get('investments', {}).get(category, [])
-        items_updated = [item for item in items if item.get('id') != item_id]
-        if len(items_updated) == len(items):
+        updated = [i for i in items if i.get('id') != item_id]
+        if len(updated) == len(items):
             return jsonify({'error': 'Item not found'}), 404
-        portfolio_data['investments'][category] = items_updated
+        portfolio_data['investments'][category] = updated
     else:
         items = portfolio_data.get(category, [])
-        items_updated = [item for item in items if item.get('id') != item_id]
-        if len(items_updated) == len(items):
+        updated = [i for i in items if i.get('id') != item_id]
+        if len(updated) == len(items):
             return jsonify({'error': 'Item not found'}), 404
-        portfolio_data[category] = items_updated
+        # Clean up any dangling property<->loan links
+        if category == 'loans':
+            for p in portfolio_data.get('real_estate', []):
+                if item_id in p.get('mortgage_loan_ids', []):
+                    p['mortgage_loan_ids'].remove(item_id)
+        portfolio_data[category] = updated
 
     save_portfolio(portfolio_data)
-    return jsonify({'ok': True, 'portfolio': portfolio_data})
-
-
-@My_Networth_blueprint.route('/api/portfolio/refresh', methods=['POST'])
-def api_portfolio_refresh():
-    """Force refresh of stock and crypto prices and save to file. Returns updated portfolio payload."""
-    errors = []
-    portfolio_data = load_portfolio()
-    stocks = portfolio_data.get('investments', {}).get('stocks', [])
-    cryptos = portfolio_data.get('investments', {}).get('cryptos', [])
-
-    try:
-        updated_stocks, updated_cryptos, price_errors = update_portfolio_prices(stocks, cryptos)
-        errors.extend(price_errors)
-
-        portfolio_data['investments']['stocks'] = updated_stocks
-        portfolio_data['investments']['cryptos'] = updated_cryptos
-        save_portfolio(portfolio_data)
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-    # Return the same payload as /api/portfolio
-    return api_portfolio()
+    return jsonify({'ok': True})
 
 
 @My_Networth_blueprint.route('/api/portfolio/add', methods=['POST'])
 def api_portfolio_add():
-    """Add a new entry to the portfolio. Expects JSON with category and entry data."""
+    denied = guard()
+    if denied:
+        return denied
     try:
         body = request.get_json(force=True)
         category = body.get('category')
     except Exception as e:
         return jsonify({'error': f'Invalid request: {e}'}), 400
-
     if category not in ('stocks', 'cryptos', 'savings', 'loans', 'real_estate'):
         return jsonify({'error': 'Invalid category'}), 400
 
     portfolio_data = load_portfolio()
-
-    # Get currency conversion rates
-    try:
-        response = requests.get(CURRENCY_API_URL)
-        rates = response.json().get('rates', {})
-    except Exception:
-        rates = {}
+    rates = get_fx_rates()
 
     try:
         if category == 'stocks':
-            symbol = body.get('symbol', '').strip().upper()
-            shares = float(body.get('shares'))
-            currency = body.get('currency', 'USD').strip().upper()
-            
-            current_price = get_real_time_price(symbol, is_crypto=False)
-            if current_price is None:
-                return jsonify({'error': f'Could not fetch price for {symbol}'}), 500
-            
-            market_value = current_price * shares
-            new_entry = {
-                'id': get_next_id('stock', portfolio_data.get('investments', {}).get('stocks', [])),
-                'symbol': symbol,
-                'shares': shares,
-                'currency': currency,
-                'market_value': market_value,
-                'last_updated': datetime.now().isoformat() + "Z"
-            }
-            
-            if 'investments' not in portfolio_data:
-                portfolio_data['investments'] = {'stocks': [], 'cryptos': []}
-            portfolio_data['investments']['stocks'].append(new_entry)
-            
+            symbol = req_str(body, 'symbol').upper()
+            if not symbol:
+                raise ValidationError('symbol is required')
+            shares = req_float(body, 'shares', allow_negative=False)
+            price, ccy = get_real_time_price(symbol, is_crypto=False)
+            usd = price_to_usd(price, ccy, rates)
+            if usd is None:
+                return jsonify({'error': f'Could not fetch price for {symbol}'}), 502
+            entry = {'id': get_next_id('stock', portfolio_data['investments']['stocks']),
+                     'symbol': symbol, 'shares': shares, 'currency': 'USD',
+                     'price_currency': ccy, 'market_value': usd * shares,
+                     'last_updated': now_iso()}
+            portfolio_data['investments']['stocks'].append(entry)
+
         elif category == 'cryptos':
-            symbol = body.get('symbol', '').strip().upper()
-            amount = float(body.get('amount'))
-            currency = body.get('currency', 'USD').strip().upper()
-            
-            current_price = get_real_time_price(symbol, is_crypto=True)
-            if current_price is None:
-                return jsonify({'error': f'Could not fetch price for {symbol}'}), 500
-            
-            market_value = current_price * amount
-            new_entry = {
-                'id': get_next_id('crypto', portfolio_data.get('investments', {}).get('cryptos', [])),
-                'symbol': symbol,
-                'amount': amount,
-                'currency': currency,
-                'market_value': market_value,
-                'last_updated': datetime.now().isoformat() + "Z"
-            }
-            
-            if 'investments' not in portfolio_data:
-                portfolio_data['investments'] = {'stocks': [], 'cryptos': []}
-            portfolio_data['investments']['cryptos'].append(new_entry)
-            
+            symbol = req_str(body, 'symbol').upper()
+            if not symbol:
+                raise ValidationError('symbol is required')
+            amount = req_float(body, 'amount', allow_negative=False)
+            price, ccy = get_real_time_price(symbol, is_crypto=True)
+            usd = price_to_usd(price, ccy, rates)
+            if usd is None:
+                return jsonify({'error': f'Could not fetch price for {symbol}'}), 502
+            entry = {'id': get_next_id('crypto', portfolio_data['investments']['cryptos']),
+                     'symbol': symbol, 'amount': amount, 'currency': 'USD',
+                     'market_value': usd * amount, 'last_updated': now_iso()}
+            portfolio_data['investments']['cryptos'].append(entry)
+
         elif category == 'savings':
-            name = body.get('name', '').strip()
-            balance = float(body.get('balance'))
-            currency = body.get('currency', 'USD').strip().upper()
-            institution = body.get('institution', name).strip()
-            account_type = body.get('account_type', 'checking').strip()
-            
-            # Convert to USD for storage
-            try:
-                balance_usd = balance / rates.get(currency, 1) if currency != 'USD' else balance
-            except (ZeroDivisionError, TypeError):
-                balance_usd = balance
-            
-            new_entry = {
-                'id': get_next_id('saving', portfolio_data.get('savings', [])),
-                'name': name,
-                'balance': balance,
-                'currency': currency,
-                'balance_usd': balance_usd,
-                'institution': institution,
-                'account_type': account_type,
-                'last_updated': datetime.now().isoformat() + "Z"
-            }
-            
-            if 'savings' not in portfolio_data:
-                portfolio_data['savings'] = []
-            portfolio_data['savings'].append(new_entry)
-            
+            name = req_str(body, 'name')
+            balance = req_float(body, 'balance')
+            currency = req_currency(body)
+            entry = {'id': get_next_id('saving', portfolio_data['savings']),
+                     'name': name, 'balance': balance, 'currency': currency,
+                     'balance_usd': to_usd(balance, currency, rates),
+                     'institution': req_str(body, 'institution', name) or name,
+                     'account_type': req_str(body, 'account_type', 'checking') or 'checking',
+                     'last_updated': now_iso()}
+            portfolio_data['savings'].append(entry)
+
         elif category == 'loans':
-            name = body.get('name', '').strip()
-            outstanding_principal = float(body.get('outstanding_principal'))
-            currency = body.get('currency', 'USD').strip().upper()
-            interest_rate = float(body.get('interest_rate', 0))
-            loan_type = body.get('loan_type', 'personal').strip()
-            lender = body.get('lender', 'Bank').strip()
-            monthly_payment = float(body.get('monthly_payment', 0))
-            
-            # Convert to USD for storage
-            try:
-                outstanding_usd = outstanding_principal / rates.get(currency, 1) if currency != 'USD' else outstanding_principal
-            except (ZeroDivisionError, TypeError):
-                outstanding_usd = outstanding_principal
-                
-            new_entry = {
-                'id': get_next_id('loan', portfolio_data.get('loans', [])),
-                'name': name,
-                'principal_amount': outstanding_principal * 1.2,  # Estimate
-                'outstanding_principal': outstanding_principal,
-                'currency': currency,
-                'outstanding_usd': outstanding_usd,
-                'interest_rate': interest_rate,
-                'lender': lender,
-                'loan_type': loan_type,
-                'monthly_payment': monthly_payment,
-                'start_date': body.get('start_date', '2023-01-01'),
-                'term_months': int(body.get('term_months', 360)),
-                'last_updated': datetime.now().isoformat() + "Z"
-            }
-            
-            if 'loans' not in portfolio_data:
-                portfolio_data['loans'] = []
-            portfolio_data['loans'].append(new_entry)
-            
+            name = req_str(body, 'name')
+            outstanding = req_float(body, 'outstanding_principal', allow_negative=False)
+            currency = req_currency(body)
+            entry = {'id': get_next_id('loan', portfolio_data['loans']),
+                     'name': name, 'outstanding_principal': outstanding, 'currency': currency,
+                     'outstanding_usd': to_usd(outstanding, currency, rates),
+                     'interest_rate': opt_float(body, 'interest_rate', 0.0),
+                     'lender': req_str(body, 'lender', 'Bank') or 'Bank',
+                     'loan_type': req_str(body, 'loan_type', 'personal') or 'personal',
+                     'monthly_payment': opt_float(body, 'monthly_payment', 0.0) or None,
+                     'principal_amount': opt_float(body, 'principal_amount', 0.0) or None,
+                     'start_date': req_str(body, 'start_date') or None,
+                     'term_months': int(opt_float(body, 'term_months', 0)) or None,
+                     'linked_property_id': body.get('linked_property_id') or None,
+                     'last_updated': now_iso()}
+            portfolio_data['loans'].append(entry)
+            # Keep the reverse link in sync
+            if entry['linked_property_id']:
+                for p in portfolio_data['real_estate']:
+                    if p['id'] == entry['linked_property_id']:
+                        p.setdefault('mortgage_loan_ids', [])
+                        if entry['id'] not in p['mortgage_loan_ids']:
+                            p['mortgage_loan_ids'].append(entry['id'])
+
         elif category == 'real_estate':
-            name = body.get('name', '').strip()
-            market_value = float(body.get('market_value'))
-            currency = body.get('currency', 'USD').strip().upper()
-            address = body.get('address', '').strip()
-            property_type = body.get('property_type', 'residential').strip()
-            purchase_price = float(body.get('purchase_price', market_value))
-            
-            # Convert to USD for storage
-            try:
-                market_value_usd = market_value / rates.get(currency, 1) if currency != 'USD' else market_value
-            except (ZeroDivisionError, TypeError):
-                market_value_usd = market_value
-                
-            new_entry = {
-                'id': get_next_id('realestate', portfolio_data.get('real_estate', [])),
-                'name': name,
-                'market_value': market_value,
-                'currency': currency,
-                'market_value_usd': market_value_usd,
-                'address': address,
-                'purchase_price': purchase_price,
-                'purchase_date': body.get('purchase_date', '2023-01-01'),
-                'property_type': property_type,
-                'last_updated': datetime.now().isoformat() + "Z"
-            }
-            
-            if 'real_estate' not in portfolio_data:
-                portfolio_data['real_estate'] = []
-            portfolio_data['real_estate'].append(new_entry)
+            name = req_str(body, 'name')
+            market_value = req_float(body, 'market_value', allow_negative=False)
+            currency = req_currency(body)
+            entry = {'id': get_next_id('realestate', portfolio_data['real_estate']),
+                     'name': name, 'market_value': market_value, 'currency': currency,
+                     'market_value_usd': to_usd(market_value, currency, rates),
+                     'address': req_str(body, 'address') or 'Not specified',
+                     'purchase_price': opt_float(body, 'purchase_price', 0.0) or None,
+                     'purchase_date': req_str(body, 'purchase_date') or None,
+                     'property_type': req_str(body, 'property_type', 'residential') or 'residential',
+                     'mortgage_loan_ids': body.get('mortgage_loan_ids', []) or [],
+                     'last_updated': now_iso()}
+            portfolio_data['real_estate'].append(entry)
 
         save_portfolio(portfolio_data)
-        return jsonify({'ok': True, 'entry': new_entry})
-        
+        return jsonify({'ok': True, 'entry': entry})
+    except ValidationError as e:
+        return jsonify({'error': str(e)}), 400
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 
 @My_Networth_blueprint.route('/api/portfolio/update', methods=['POST'])
 def api_portfolio_update():
-    """Update an existing entry in the portfolio. Expects JSON with category, id, and updated fields."""
+    denied = guard()
+    if denied:
+        return denied
     try:
         body = request.get_json(force=True)
         category = body.get('category')
         item_id = body.get('id')
     except Exception as e:
         return jsonify({'error': f'Invalid request: {e}'}), 400
-
     if category not in ('stocks', 'cryptos', 'savings', 'loans', 'real_estate'):
         return jsonify({'error': 'Invalid category'}), 400
 
     portfolio_data = load_portfolio()
-
-    # Get currency conversion rates
-    try:
-        response = requests.get(CURRENCY_API_URL)
-        rates = response.json().get('rates', {})
-    except Exception:
-        rates = {}
-
-    # Find the item to update
-    items = None
+    rates = get_fx_rates()
     if category in ('stocks', 'cryptos'):
         items = portfolio_data.get('investments', {}).get(category, [])
     else:
         items = portfolio_data.get(category, [])
-    
-    item_index = next((i for i, item in enumerate(items) if item.get('id') == item_id), None)
-    if item_index is None:
+    idx = next((i for i, it in enumerate(items) if it.get('id') == item_id), None)
+    if idx is None:
         return jsonify({'error': 'Item not found'}), 404
 
     try:
-        item = items[item_index]
-        
+        item = items[idx]
         if category == 'stocks':
             if 'symbol' in body:
                 item['symbol'] = body['symbol'].strip().upper()
             if 'shares' in body:
-                item['shares'] = float(body['shares'])
-            if 'currency' in body:
-                item['currency'] = body['currency'].strip().upper()
-            
-            # Refresh price if symbol or shares changed
+                item['shares'] = req_float(body, 'shares', allow_negative=False)
             if 'symbol' in body or 'shares' in body:
-                current_price = get_real_time_price(item['symbol'], is_crypto=False)
-                if current_price is not None:
-                    item['market_value'] = current_price * item['shares']
-                    
+                price, ccy = get_real_time_price(item['symbol'], is_crypto=False)
+                usd = price_to_usd(price, ccy, rates)
+                if usd is not None:
+                    item['market_value'] = usd * item['shares']
+                    item['price_currency'] = ccy
         elif category == 'cryptos':
             if 'symbol' in body:
                 item['symbol'] = body['symbol'].strip().upper()
             if 'amount' in body:
-                item['amount'] = float(body['amount'])
-            if 'currency' in body:
-                item['currency'] = body['currency'].strip().upper()
-                
-            # Refresh price if symbol or amount changed
+                item['amount'] = req_float(body, 'amount', allow_negative=False)
             if 'symbol' in body or 'amount' in body:
-                current_price = get_real_time_price(item['symbol'], is_crypto=True)
-                if current_price is not None:
-                    item['market_value'] = current_price * item['amount']
-                    
+                price, ccy = get_real_time_price(item['symbol'], is_crypto=True)
+                usd = price_to_usd(price, ccy, rates)
+                if usd is not None:
+                    item['market_value'] = usd * item['amount']
         elif category == 'savings':
             if 'name' in body:
                 item['name'] = body['name'].strip()
-            if 'balance' in body:
-                item['balance'] = float(body['balance'])
-                # Recalculate USD value
-                currency = item.get('currency', 'USD')
-                try:
-                    item['balance_usd'] = item['balance'] / rates.get(currency, 1) if currency != 'USD' else item['balance']
-                except (ZeroDivisionError, TypeError):
-                    item['balance_usd'] = item['balance']
             if 'currency' in body:
                 item['currency'] = body['currency'].strip().upper()
+            if 'balance' in body:
+                item['balance'] = req_float(body, 'balance')
+            item['balance_usd'] = to_usd(item['balance'], item['currency'], rates)
             if 'institution' in body:
                 item['institution'] = body['institution'].strip()
             if 'account_type' in body:
                 item['account_type'] = body['account_type'].strip()
-                
         elif category == 'loans':
             if 'name' in body:
                 item['name'] = body['name'].strip()
-            if 'outstanding_principal' in body:
-                item['outstanding_principal'] = float(body['outstanding_principal'])
-                # Recalculate USD value
-                currency = item.get('currency', 'USD')
-                try:
-                    item['outstanding_usd'] = item['outstanding_principal'] / rates.get(currency, 1) if currency != 'USD' else item['outstanding_principal']
-                except (ZeroDivisionError, TypeError):
-                    item['outstanding_usd'] = item['outstanding_principal']
             if 'currency' in body:
                 item['currency'] = body['currency'].strip().upper()
+            if 'outstanding_principal' in body:
+                item['outstanding_principal'] = req_float(body, 'outstanding_principal', allow_negative=False)
+            item['outstanding_usd'] = to_usd(item['outstanding_principal'], item['currency'], rates)
             if 'interest_rate' in body:
-                item['interest_rate'] = float(body['interest_rate'])
+                item['interest_rate'] = opt_float(body, 'interest_rate', item.get('interest_rate', 0))
             if 'monthly_payment' in body:
-                item['monthly_payment'] = float(body['monthly_payment'])
+                item['monthly_payment'] = opt_float(body, 'monthly_payment', 0) or None
             if 'loan_type' in body:
                 item['loan_type'] = body['loan_type'].strip()
-                
         elif category == 'real_estate':
             if 'name' in body:
                 item['name'] = body['name'].strip()
-            if 'market_value' in body:
-                item['market_value'] = float(body['market_value'])
-                # Recalculate USD value
-                currency = item.get('currency', 'USD')
-                try:
-                    item['market_value_usd'] = item['market_value'] / rates.get(currency, 1) if currency != 'USD' else item['market_value']
-                except (ZeroDivisionError, TypeError):
-                    item['market_value_usd'] = item['market_value']
             if 'currency' in body:
                 item['currency'] = body['currency'].strip().upper()
+            if 'market_value' in body:
+                item['market_value'] = req_float(body, 'market_value', allow_negative=False)
+            item['market_value_usd'] = to_usd(item['market_value'], item['currency'], rates)
             if 'address' in body:
                 item['address'] = body['address'].strip()
             if 'property_type' in body:
                 item['property_type'] = body['property_type'].strip()
 
-        # Update timestamp
-        item['last_updated'] = datetime.now().isoformat() + "Z"
-        
+        item['last_updated'] = now_iso()
         save_portfolio(portfolio_data)
         return jsonify({'ok': True, 'entry': item})
-        
+    except ValidationError as e:
+        return jsonify({'error': str(e)}), 400
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 
+# --- Recurring transactions API ---------------------------------------------
+
 @My_Networth_blueprint.route('/api/recurring', methods=['GET'])
 def api_recurring_list():
-    """Get all recurring transactions"""
     portfolio_data = load_portfolio()
     recurring = portfolio_data.get('recurring_transactions', {'income': [], 'expenses': []})
-    
-    # Get account names for display
-    account_map = {}
-    for account in portfolio_data.get('savings', []):
-        account_map[account['id']] = account['name']
-    
-    # Add account names to transactions
+    account_map = {a['id']: a['name'] for a in portfolio_data.get('savings', [])}
     for income in recurring['income']:
         income['target_account_name'] = account_map.get(income.get('target_account_id'), 'Unknown Account')
-    
     for expense in recurring['expenses']:
         expense['source_account_name'] = account_map.get(expense.get('source_account_id'), 'Unknown Account')
-    
     return jsonify(recurring)
+
+
+def _add_recurring(kind, account_field):
+    denied = guard()
+    if denied:
+        return denied
+    try:
+        body = request.get_json(force=True)
+        portfolio_data = load_portfolio()
+        for field in ('name', 'amount', 'currency', 'frequency', 'start_date', account_field):
+            if field not in body or body[field] in (None, ''):
+                return jsonify({'error': f'Missing required field: {field}'}), 400
+        if not any(a['id'] == body[account_field] for a in portfolio_data.get('savings', [])):
+            return jsonify({'error': 'Account not found'}), 400
+        frequency = body['frequency'].strip().lower()
+        if frequency not in ('weekly', 'monthly', 'quarterly', 'yearly'):
+            return jsonify({'error': f'Unsupported frequency: {frequency}'}), 400
+        entry = {
+            'id': get_next_id(f'recurring_{kind}', portfolio_data['recurring_transactions'][kind + ('s' if kind == 'expense' else '')]),
+            'name': body['name'].strip(),
+            'amount': float(body['amount']),
+            'currency': body['currency'].strip().upper(),
+            'frequency': frequency,
+            'start_date': body['start_date'],
+            'end_date': body.get('end_date'),
+            'next_due_date': body['start_date'],
+            account_field: body[account_field],
+            'description': (body.get('description') or '').strip(),
+            'is_active': body.get('is_active', True),
+            'last_processed': None,
+            'created_date': now_iso(),
+        }
+        if kind == 'expense':
+            entry['category'] = (body.get('category') or 'general').strip()
+        bucket = 'income' if kind == 'income' else 'expenses'
+        portfolio_data['recurring_transactions'][bucket].append(entry)
+        save_portfolio(portfolio_data)
+        return jsonify({'ok': True, 'entry': entry})
+    except ValueError:
+        return jsonify({'error': "'amount' must be a number"}), 400
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 @My_Networth_blueprint.route('/api/recurring/income/add', methods=['POST'])
 def api_recurring_income_add():
-    """Add a new recurring income"""
-    try:
-        body = request.get_json(force=True)
-        portfolio_data = load_portfolio()
-        
-        # Validate required fields
-        required_fields = ['name', 'amount', 'currency', 'frequency', 'start_date', 'target_account_id']
-        for field in required_fields:
-            if field not in body:
-                return jsonify({'error': f'Missing required field: {field}'}), 400
-        
-        # Validate target account exists
-        target_account_exists = any(account['id'] == body['target_account_id'] for account in portfolio_data.get('savings', []))
-        if not target_account_exists:
-            return jsonify({'error': 'Target account not found'}), 400
-        
-        # Create new recurring income
-        new_income = {
-            'id': get_next_id('recurring_income', portfolio_data.get('recurring_transactions', {}).get('income', [])),
-            'name': body['name'].strip(),
-            'amount': float(body['amount']),
-            'currency': body['currency'].strip().upper(),
-            'frequency': body['frequency'].strip().lower(),
-            'start_date': body['start_date'],
-            'end_date': body.get('end_date'),
-            'next_due_date': body['start_date'],  # First occurrence
-            'target_account_id': body['target_account_id'],
-            'description': body.get('description', '').strip(),
-            'is_active': body.get('is_active', True),
-            'last_processed': None,
-            'created_date': datetime.now().isoformat() + "Z"
-        }
-        
-        if 'recurring_transactions' not in portfolio_data:
-            portfolio_data['recurring_transactions'] = {'income': [], 'expenses': []}
-        
-        portfolio_data['recurring_transactions']['income'].append(new_income)
-        save_portfolio(portfolio_data)
-        
-        return jsonify({'ok': True, 'entry': new_income})
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    return _add_recurring('income', 'target_account_id')
 
 
 @My_Networth_blueprint.route('/api/recurring/expense/add', methods=['POST'])
 def api_recurring_expense_add():
-    """Add a new recurring expense"""
+    return _add_recurring('expense', 'source_account_id')
+
+
+@My_Networth_blueprint.route('/api/recurring/update', methods=['POST'])
+def api_recurring_update():
+    denied = guard()
+    if denied:
+        return denied
     try:
         body = request.get_json(force=True)
+        transaction_type = body.get('type')
+        transaction_id = body.get('id')
+        if transaction_type not in ('income', 'expense'):
+            return jsonify({'error': 'Invalid transaction type'}), 400
         portfolio_data = load_portfolio()
-        
-        # Validate required fields
-        required_fields = ['name', 'amount', 'currency', 'frequency', 'start_date', 'source_account_id']
-        for field in required_fields:
-            if field not in body:
-                return jsonify({'error': f'Missing required field: {field}'}), 400
-        
-        # Validate source account exists
-        source_account_exists = any(account['id'] == body['source_account_id'] for account in portfolio_data.get('savings', []))
-        if not source_account_exists:
-            return jsonify({'error': 'Source account not found'}), 400
-        
-        # Create new recurring expense
-        new_expense = {
-            'id': get_next_id('recurring_expense', portfolio_data.get('recurring_transactions', {}).get('expenses', [])),
-            'name': body['name'].strip(),
-            'amount': float(body['amount']),
-            'currency': body['currency'].strip().upper(),
-            'frequency': body['frequency'].strip().lower(),
-            'start_date': body['start_date'],
-            'end_date': body.get('end_date'),
-            'next_due_date': body['start_date'],  # First occurrence
-            'source_account_id': body['source_account_id'],
-            'category': body.get('category', 'general').strip(),
-            'description': body.get('description', '').strip(),
-            'is_active': body.get('is_active', True),
-            'last_processed': None,
-            'created_date': datetime.now().isoformat() + "Z"
-        }
-        
-        if 'recurring_transactions' not in portfolio_data:
-            portfolio_data['recurring_transactions'] = {'income': [], 'expenses': []}
-        
-        portfolio_data['recurring_transactions']['expenses'].append(new_expense)
+        bucket = 'income' if transaction_type == 'income' else 'expenses'
+        account_field = 'target_account_id' if transaction_type == 'income' else 'source_account_id'
+        items = portfolio_data['recurring_transactions'].get(bucket, [])
+        item = next((i for i in items if i.get('id') == transaction_id), None)
+        if item is None:
+            return jsonify({'error': 'Transaction not found'}), 404
+
+        if 'name' in body:
+            item['name'] = body['name'].strip()
+        if 'amount' in body:
+            item['amount'] = float(body['amount'])
+        if 'currency' in body:
+            item['currency'] = body['currency'].strip().upper()
+        if 'description' in body:
+            item['description'] = (body.get('description') or '').strip()
+        if transaction_type == 'expense' and 'category' in body:
+            item['category'] = (body.get('category') or 'general').strip()
+        if body.get(account_field):
+            if not any(a['id'] == body[account_field] for a in portfolio_data.get('savings', [])):
+                return jsonify({'error': 'Account not found'}), 400
+            item[account_field] = body[account_field]
+        if 'frequency' in body:
+            freq = body['frequency'].strip().lower()
+            if freq not in ('weekly', 'monthly', 'quarterly', 'yearly'):
+                return jsonify({'error': f'Unsupported frequency: {freq}'}), 400
+            item['frequency'] = freq
+        # If the schedule changed, restart it from the (new) start date.
+        if 'start_date' in body and body['start_date']:
+            item['start_date'] = body['start_date']
+            item['next_due_date'] = body['start_date']
+            item['last_processed'] = None
+
         save_portfolio(portfolio_data)
-        
-        return jsonify({'ok': True, 'entry': new_expense})
-        
+        return jsonify({'ok': True, 'entry': item})
+    except ValueError:
+        return jsonify({'error': "'amount' must be a number"}), 400
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 
 @My_Networth_blueprint.route('/api/recurring/delete', methods=['POST'])
 def api_recurring_delete():
-    """Delete a recurring transaction. Expects JSON {type: 'income'|'expense', id: str}"""
+    denied = guard()
+    if denied:
+        return denied
     try:
         body = request.get_json(force=True)
         transaction_type = body.get('type')
         transaction_id = body.get('id')
-        
         if transaction_type not in ('income', 'expense'):
             return jsonify({'error': 'Invalid transaction type'}), 400
-            
         portfolio_data = load_portfolio()
-        recurring = portfolio_data.get('recurring_transactions', {'income': [], 'expenses': []})
-        
-        if transaction_type == 'income':
-            items = recurring.get('income', [])
-            items_updated = [item for item in items if item.get('id') != transaction_id]
-            if len(items_updated) == len(items):
-                return jsonify({'error': 'Transaction not found'}), 404
-            portfolio_data['recurring_transactions']['income'] = items_updated
-        else:  # expense
-            items = recurring.get('expenses', [])
-            items_updated = [item for item in items if item.get('id') != transaction_id]
-            if len(items_updated) == len(items):
-                return jsonify({'error': 'Transaction not found'}), 404
-            portfolio_data['recurring_transactions']['expenses'] = items_updated
-        
+        bucket = 'income' if transaction_type == 'income' else 'expenses'
+        items = portfolio_data['recurring_transactions'].get(bucket, [])
+        updated = [i for i in items if i.get('id') != transaction_id]
+        if len(updated) == len(items):
+            return jsonify({'error': 'Transaction not found'}), 404
+        portfolio_data['recurring_transactions'][bucket] = updated
         save_portfolio(portfolio_data)
         return jsonify({'ok': True})
-        
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 
 @My_Networth_blueprint.route('/api/recurring/process', methods=['POST'])
 def api_recurring_process():
-    """Manually trigger recurring transaction processing"""
+    denied = guard()
+    if denied:
+        return denied
     try:
         portfolio_data = load_portfolio()
-        processed_transactions = process_recurring_transactions(portfolio_data)
-        
-        if processed_transactions:
+        processed = process_recurring_transactions(portfolio_data)
+        if processed:
             save_portfolio(portfolio_data)
-        
-        return jsonify({
-            'ok': True,
-            'processed_count': len(processed_transactions),
-            'transactions': processed_transactions
-        })
-        
+        return jsonify({'ok': True, 'processed_count': len(processed), 'transactions': processed})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+# ---------------------------------------------------------------------------
+# Legacy textarea form parsing (page POST)
+# ---------------------------------------------------------------------------
+
+def _parse_form_lines(portfolio_data, rates, errors):
+    """Parse the multi-line textareas on the page form and append entries."""
+    inv = portfolio_data.setdefault('investments', {'stocks': [], 'cryptos': []})
+
+    for line in request.form.get('stocks', '').splitlines():
+        parts = [p.strip() for p in line.split(',') if p.strip() != '' or True]
+        if not line.strip():
+            continue
+        parts = [p.strip() for p in line.split(',')]
+        if len(parts) >= 2:
+            symbol = parts[0].upper()
+            try:
+                shares = float(parts[1])
+            except ValueError:
+                errors.append(f"Invalid share count for {symbol}")
+                continue
+            price, ccy = get_real_time_price(symbol, is_crypto=False)
+            usd = price_to_usd(price, ccy, rates)
+            if usd is None:
+                errors.append(f"Could not fetch price for stock {symbol}")
+                continue
+            inv['stocks'].append({'id': get_next_id('stock', inv['stocks']), 'symbol': symbol,
+                                  'shares': shares, 'currency': 'USD', 'price_currency': ccy,
+                                  'market_value': usd * shares, 'last_updated': now_iso()})
+
+    for line in request.form.get('cryptos', '').splitlines():
+        if not line.strip():
+            continue
+        parts = [p.strip() for p in line.split(',')]
+        if len(parts) >= 2:
+            symbol = parts[0].upper()
+            try:
+                amount = float(parts[1])
+            except ValueError:
+                errors.append(f"Invalid amount for {symbol}")
+                continue
+            price, ccy = get_real_time_price(symbol, is_crypto=True)
+            usd = price_to_usd(price, ccy, rates)
+            if usd is None:
+                errors.append(f"Could not fetch price for cryptocurrency {symbol}")
+                continue
+            inv['cryptos'].append({'id': get_next_id('crypto', inv['cryptos']), 'symbol': symbol,
+                                   'amount': amount, 'currency': 'USD',
+                                   'market_value': usd * amount, 'last_updated': now_iso()})
+
+    for line in request.form.get('savings', '').splitlines():
+        if not line.strip():
+            continue
+        parts = [p.strip() for p in line.split(',')]
+        if len(parts) >= 3:
+            try:
+                balance = float(parts[1])
+            except ValueError:
+                errors.append(f"Invalid balance for {parts[0]}")
+                continue
+            currency = parts[2].upper()
+            portfolio_data.setdefault('savings', []).append({
+                'id': get_next_id('saving', portfolio_data.get('savings', [])),
+                'name': parts[0], 'balance': balance, 'currency': currency,
+                'balance_usd': to_usd(balance, currency, rates),
+                'institution': parts[3] if len(parts) >= 4 else parts[0],
+                'account_type': 'checking', 'last_updated': now_iso()})
+
+    for line in request.form.get('loans', '').splitlines():
+        if not line.strip():
+            continue
+        parts = [p.strip() for p in line.split(',')]
+        if len(parts) >= 3:
+            try:
+                outstanding = float(parts[1])
+                interest = float(parts[3]) if len(parts) >= 4 else 0.0
+            except ValueError:
+                errors.append(f"Invalid number for loan {parts[0]}")
+                continue
+            currency = parts[2].upper()
+            portfolio_data.setdefault('loans', []).append({
+                'id': get_next_id('loan', portfolio_data.get('loans', [])),
+                'name': parts[0], 'outstanding_principal': outstanding, 'currency': currency,
+                'outstanding_usd': to_usd(outstanding, currency, rates),
+                'interest_rate': interest, 'lender': 'Bank', 'loan_type': 'personal',
+                'monthly_payment': None, 'principal_amount': None, 'start_date': None,
+                'term_months': None, 'linked_property_id': None, 'last_updated': now_iso()})
+
+    for line in request.form.get('real_estate', '').splitlines():
+        if not line.strip():
+            continue
+        parts = [p.strip() for p in line.split(',')]
+        if len(parts) >= 3:
+            try:
+                market_value = float(parts[1])
+            except ValueError:
+                errors.append(f"Invalid market value for {parts[0]}")
+                continue
+            currency = parts[2].upper()
+            portfolio_data.setdefault('real_estate', []).append({
+                'id': get_next_id('realestate', portfolio_data.get('real_estate', [])),
+                'name': parts[0], 'market_value': market_value, 'currency': currency,
+                'market_value_usd': to_usd(market_value, currency, rates),
+                'address': parts[3] if len(parts) >= 4 else 'Not specified',
+                'purchase_price': None, 'purchase_date': None, 'property_type': 'residential',
+                'mortgage_loan_ids': [], 'last_updated': now_iso()})
+
+
+# ---------------------------------------------------------------------------
+# Page route
+# ---------------------------------------------------------------------------
 
 @My_Networth_blueprint.route('/My_Networth_html', methods=['GET', 'POST'])
 def calculate_net_worth():
     errors = []
-    
-    # Load existing networth data
-    portfolio_data = load_portfolio()
-    
-    # Get display currency from URL parameter or use stored currency as fallback
-    display_currency = request.args.get('currency') or portfolio_data.get('currency', 'USD')
-    target_currency = portfolio_data.get('currency', 'USD')
 
-    # Get currency conversion rates
-    currency_conversion = {}
-    try:
-        response = requests.get(CURRENCY_API_URL)
-        data = response.json()
-        currency_conversion = data['rates']
-    except Exception as e:
-        errors.append(f"Error fetching currency exchange rates: {str(e)}")
+    # Clear: actually reset the stored data to defaults.
+    if request.args.get('clear') == 'true':
+        save_portfolio(default_portfolio())
+        return redirect(url_for('My_Networth_blueprint.calculate_net_worth'))
+
+    portfolio_data = load_portfolio()
+    rates = get_fx_rates()
+    display_currency = (request.args.get('currency') or portfolio_data.get('currency', 'USD')).upper()
 
     if request.method == 'POST':
-        new_currency = request.form.get('currency', 'USD')
-        if new_currency != target_currency:
-            target_currency = new_currency
-            portfolio_data['currency'] = target_currency
+        if not token_ok():
+            errors.append('Unauthorized')
+        else:
+            new_currency = request.form.get('currency', display_currency)
+            if new_currency:
+                portfolio_data['currency'] = new_currency.upper()
+                display_currency = new_currency.upper()
+            try:
+                _parse_form_lines(portfolio_data, rates, errors)
+                save_portfolio(portfolio_data)
+                if not errors:
+                    return redirect(url_for('My_Networth_blueprint.calculate_net_worth',
+                                            currency=display_currency))
+            except Exception as e:
+                errors.append(f"An error occurred: {e}")
 
-        # Process form submissions for different categories
-        try:
-            # Process stocks
-            stock_entries = request.form.get('stocks', '').strip()
-            for stock_entry in stock_entries.splitlines():
-                if not stock_entry.strip():
-                    continue
-                parts = stock_entry.split(',')
-                if len(parts) >= 2:
-                    symbol = parts[0].strip().upper()
-                    shares = float(parts[1].strip())
-                    currency = parts[2].strip().upper() if len(parts) >= 3 else 'USD'
-                    
-                    current_price = get_real_time_price(symbol, is_crypto=False)
-                    if current_price is not None:
-                        market_value = current_price * shares
-                        new_entry = {
-                            'id': get_next_id('stock', portfolio_data.get('investments', {}).get('stocks', [])),
-                            'symbol': symbol,
-                            'shares': shares,
-                            'currency': currency,
-                            'market_value': market_value,
-                            'last_updated': datetime.now().isoformat() + "Z"
-                        }
-                        if 'investments' not in portfolio_data:
-                            portfolio_data['investments'] = {'stocks': [], 'cryptos': []}
-                        portfolio_data['investments']['stocks'].append(new_entry)
-                    else:
-                        errors.append(f"Could not fetch price for stock {symbol}")
-
-            # Process cryptos
-            crypto_entries = request.form.get('cryptos', '').strip()
-            for crypto_entry in crypto_entries.splitlines():
-                if not crypto_entry.strip():
-                    continue
-                parts = crypto_entry.split(',')
-                if len(parts) >= 2:
-                    symbol = parts[0].strip().upper()
-                    amount = float(parts[1].strip())
-                    currency = parts[2].strip().upper() if len(parts) >= 3 else 'USD'
-                    
-                    current_price = get_real_time_price(symbol, is_crypto=True)
-                    if current_price is not None:
-                        market_value = current_price * amount
-                        new_entry = {
-                            'id': get_next_id('crypto', portfolio_data.get('investments', {}).get('cryptos', [])),
-                            'symbol': symbol,
-                            'amount': amount,
-                            'currency': currency,
-                            'market_value': market_value,
-                            'last_updated': datetime.now().isoformat() + "Z"
-                        }
-                        if 'investments' not in portfolio_data:
-                            portfolio_data['investments'] = {'stocks': [], 'cryptos': []}
-                        portfolio_data['investments']['cryptos'].append(new_entry)
-                    else:
-                        errors.append(f"Could not fetch price for cryptocurrency {symbol}")
-
-            # Process savings
-            savings_entries = request.form.get('savings', '').strip()
-            for savings_entry in savings_entries.splitlines():
-                if not savings_entry.strip():
-                    continue
-                parts = savings_entry.split(',')
-                if len(parts) >= 3:
-                    name = parts[0].strip()
-                    balance = float(parts[1].strip())
-                    currency = parts[2].strip().upper()
-                    institution = parts[3].strip() if len(parts) >= 4 else name
-                    
-                    # Convert to USD
-                    try:
-                        balance_usd = balance / currency_conversion.get(currency, 1) if currency != 'USD' else balance
-                    except (ZeroDivisionError, TypeError):
-                        balance_usd = balance
-                        
-                    new_entry = {
-                        'id': get_next_id('saving', portfolio_data.get('savings', [])),
-                        'name': name,
-                        'balance': balance,
-                        'currency': currency,
-                        'balance_usd': balance_usd,
-                        'institution': institution,
-                        'account_type': 'checking',
-                        'last_updated': datetime.now().isoformat() + "Z"
-                    }
-                    if 'savings' not in portfolio_data:
-                        portfolio_data['savings'] = []
-                    portfolio_data['savings'].append(new_entry)
-
-            # Process loans
-            loan_entries = request.form.get('loans', '').strip()
-            for loan_entry in loan_entries.splitlines():
-                if not loan_entry.strip():
-                    continue
-                parts = loan_entry.split(',')
-                if len(parts) >= 3:
-                    name = parts[0].strip()
-                    outstanding = float(parts[1].strip())
-                    currency = parts[2].strip().upper()
-                    interest_rate = float(parts[3].strip()) if len(parts) >= 4 else 3.5
-                    
-                    # Convert to USD
-                    try:
-                        outstanding_usd = outstanding / currency_conversion.get(currency, 1) if currency != 'USD' else outstanding
-                    except (ZeroDivisionError, TypeError):
-                        outstanding_usd = outstanding
-                        
-                    new_entry = {
-                        'id': get_next_id('loan', portfolio_data.get('loans', [])),
-                        'name': name,
-                        'principal_amount': outstanding * 1.2,  # Estimate
-                        'outstanding_principal': outstanding,
-                        'currency': currency,
-                        'outstanding_usd': outstanding_usd,
-                        'interest_rate': interest_rate,
-                        'lender': 'Bank',
-                        'loan_type': 'personal',
-                        'monthly_payment': outstanding * 0.01,  # Estimate
-                        'start_date': '2023-01-01',
-                        'term_months': 360,
-                        'last_updated': datetime.now().isoformat() + "Z"
-                    }
-                    if 'loans' not in portfolio_data:
-                        portfolio_data['loans'] = []
-                    portfolio_data['loans'].append(new_entry)
-
-            # Process real estate
-            realestate_entries = request.form.get('real_estate', '').strip()
-            for re_entry in realestate_entries.splitlines():
-                if not re_entry.strip():
-                    continue
-                parts = re_entry.split(',')
-                if len(parts) >= 3:
-                    name = parts[0].strip()
-                    market_value = float(parts[1].strip())
-                    currency = parts[2].strip().upper()
-                    address = parts[3].strip() if len(parts) >= 4 else 'Not specified'
-                    
-                    # Convert to USD
-                    try:
-                        market_value_usd = market_value / currency_conversion.get(currency, 1) if currency != 'USD' else market_value
-                    except (ZeroDivisionError, TypeError):
-                        market_value_usd = market_value
-                        
-                    new_entry = {
-                        'id': get_next_id('realestate', portfolio_data.get('real_estate', [])),
-                        'name': name,
-                        'market_value': market_value,
-                        'currency': currency,
-                        'market_value_usd': market_value_usd,
-                        'address': address,
-                        'purchase_price': market_value * 0.9,  # Estimate
-                        'purchase_date': '2023-01-01',
-                        'property_type': 'residential',
-                        'last_updated': datetime.now().isoformat() + "Z"
-                    }
-                    if 'real_estate' not in portfolio_data:
-                        portfolio_data['real_estate'] = []
-                    portfolio_data['real_estate'].append(new_entry)
-
-            # Save updated data
-            save_portfolio(portfolio_data)
-
-            # If no errors, redirect to avoid duplicate submissions
-            if not errors:
-                return redirect(url_for('My_Networth_blueprint.calculate_net_worth'))
-
-        except Exception as e:
-            errors.append(f"An error occurred: {str(e)}")
-
-    # Handle clear request
-    if request.args.get('clear') == 'true':
-        portfolio_data = load_portfolio()  # Reset to default
-        save_portfolio(portfolio_data)
-        return render_template('My_Networth_html.html', errors=[], 
-                             stocks=[], cryptos=[], savings=[], loans=[], real_estate=[],
-                             totals={'stocks': 0, 'cryptos': 0, 'savings': 0, 'loans': 0, 
-                                   'real_estate': 0, 'net_cash': 0, 'grand_total': 0},
-                             currency="USD", last_updated=None, 
-                             format_currency_value=format_currency_value,
-                             get_currency_symbol=get_currency_symbol)
-
-    # Prepare display data with currency conversion
+    # Apply any due recurring transactions (idempotent per day) on full page load.
     try:
-        resp = requests.get(CURRENCY_API_URL)
-        rates = resp.json().get('rates', {})
-    except Exception:
-        rates = currency_conversion or {}
+        if process_recurring_transactions(portfolio_data):
+            save_portfolio(portfolio_data)
+    except Exception as e:
+        errors.append(f"Error processing recurring transactions: {e}")
 
-    # Get data for display
-    stocks = portfolio_data.get('investments', {}).get('stocks', [])
-    cryptos = portfolio_data.get('investments', {}).get('cryptos', [])
-    savings = portfolio_data.get('savings', [])
-    loans = portfolio_data.get('loans', [])
-    real_estate = portfolio_data.get('real_estate', [])
+    # Refresh prices at most once per TTL (guarded, user-initiated navigation).
+    if needs_refresh(portfolio_data.get('last_updated')):
+        stocks = portfolio_data.get('investments', {}).get('stocks', [])
+        cryptos = portfolio_data.get('investments', {}).get('cryptos', [])
+        errors.extend(update_portfolio_prices(stocks, cryptos, rates))
+        save_portfolio(portfolio_data)
 
-    # Convert for display
-    stocks_display = []
-    for stock in stocks:
-        converted_value = usd_to_target(stock['market_value'], display_currency, rates)
-        stocks_display.append({
-            'id': stock['id'],
-            'symbol': stock['symbol'],
-            'shares': stock['shares'],
-            'currency': stock['currency'],
-            'market_value': round(converted_value, 2)
-        })
+    payload = build_payload(portfolio_data, display_currency, rates)
+    record_snapshot(payload['totals_usd'])
 
-    cryptos_display = []
-    for crypto in cryptos:
-        converted_value = usd_to_target(crypto['market_value'], display_currency, rates)
-        cryptos_display.append({
-            'id': crypto['id'],
-            'symbol': crypto['symbol'],
-            'amount': crypto['amount'],
-            'currency': crypto['currency'],
-            'market_value': round(converted_value, 2)
-        })
-
-    savings_display = []
-    for saving in savings:
-        if saving['currency'] == display_currency:
-            display_value = saving['balance']
-        else:
-            display_value = usd_to_target(saving['balance_usd'], display_currency, rates)
-        savings_display.append({
-            'id': saving['id'],
-            'name': saving['name'],
-            'balance': saving['balance'],
-            'currency': saving['currency'],
-            'display_value': round(display_value, 2),
-            'institution': saving.get('institution', '')
-        })
-
-    loans_display = []
-    for loan in loans:
-        if loan['currency'] == display_currency:
-            display_value = -loan['outstanding_principal']  # Negative for display
-        else:
-            display_value = -usd_to_target(loan['outstanding_usd'], display_currency, rates)
-        loans_display.append({
-            'id': loan['id'],
-            'name': loan['name'],
-            'outstanding_principal': loan['outstanding_principal'],
-            'currency': loan['currency'],
-            'display_value': round(display_value, 2),
-            'interest_rate': loan.get('interest_rate', 0)
-        })
-
-    real_estate_display = []
-    for property in real_estate:
-        if property['currency'] == display_currency:
-            display_value = property['market_value']
-        else:
-            display_value = usd_to_target(property['market_value_usd'], display_currency, rates)
-        
-        # Calculate equity in display currency - handle missing equity gracefully
-        equity_display = 0
-        if 'computed_equity' in property and property['computed_equity'] is not None:
-            if property['currency'] == display_currency:
-                equity_display = property['computed_equity']
-            else:
-                equity_usd = property.get('computed_equity_usd', 0)
-                equity_display = usd_to_target(equity_usd, display_currency, rates)
-        else:
-            # No mortgage, so equity equals market value
-            equity_display = display_value
-            
-        real_estate_display.append({
-            'id': property['id'],
-            'name': property['name'],
-            'market_value': property['market_value'],
-            'currency': property['currency'],
-            'display_value': round(display_value, 2),
-            'equity': round(equity_display, 2),
-            'address': property.get('address', '')
-        })
-
-    # Calculate totals
-    total_stocks_worth = sum(item['market_value'] for item in stocks_display)
-    total_crypto_worth = sum(item['market_value'] for item in cryptos_display)
-    total_savings = sum(item['display_value'] for item in savings_display)
-    total_loans = sum(item['display_value'] for item in loans_display)  # Already negative
-    total_real_estate = sum(item['display_value'] for item in real_estate_display)
-    
-    net_cash = total_savings + total_loans
-    grand_total_worth = total_stocks_worth + total_crypto_worth + net_cash + total_real_estate
-
-    totals = {
-        'stocks': total_stocks_worth,
-        'cryptos': total_crypto_worth,
-        'savings': total_savings,
-        'loans': total_loans,
-        'real_estate': total_real_estate,
-        'net_cash': net_cash,
-        'grand_total': grand_total_worth
-    }
-
-    # Format last_updated for display
-    lu = portfolio_data.get('last_updated')
-    if lu:
-        try:
-            if 'T' in lu and lu.endswith('Z'):
-                lu_dt = datetime.fromisoformat(lu.replace('Z', '+00:00'))
-            else:
-                lu_dt = datetime.strptime(lu, "%Y-%m-%d %H:%M:%S")
-            last_updated_display = lu_dt.strftime("%Y-%m-%d %H:%M")
-        except Exception:
-            last_updated_display = lu
-    else:
-        last_updated_display = None
-
-    return render_template('My_Networth_html.html', errors=errors, 
-                         stocks=stocks_display, cryptos=cryptos_display, 
-                         savings=savings_display, loans=loans_display, 
-                         real_estate=real_estate_display, totals=totals,
-                         currency=display_currency, last_updated=last_updated_display,
-                         format_currency_value=format_currency_value,
-                         get_currency_symbol=get_currency_symbol)
-
-app = Flask(__name__)
-app.register_blueprint(My_Networth_blueprint)
-
-# Note: When deploying, ensure to handle the API keys and endpoint URLs securely.
+    return render_template(
+        'My_Networth_html.html', errors=errors,
+        stocks=payload['stocks'], cryptos=payload['cryptos'], savings=payload['savings'],
+        loans=payload['loans'], real_estate=payload['real_estate'], totals=payload['totals'],
+        currency=display_currency, last_updated=payload['last_updated'],
+        supported_currencies=SUPPORTED_CURRENCIES,
+        format_currency_value=format_currency_value, get_currency_symbol=get_currency_symbol,
+    )

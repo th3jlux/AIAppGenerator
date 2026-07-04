@@ -1,0 +1,360 @@
+{
+  "schema_version": "1.0",
+  "currency": "EUR",
+  "last_updated": "2026-07-04T06:55:08.614066Z",
+  "savings": [
+    {
+      "id": "saving_004",
+      "name": "DE",
+      "balance": 23446.0,
+      "currency": "EUR",
+      "balance_usd": 27073.903002309467,
+      "institution": "Wise Main",
+      "account_type": "checking",
+      "last_updated": "2026-06-10T11:53:12.886548Z"
+    },
+    {
+      "id": "saving_005",
+      "name": "DE",
+      "balance": 6798.0,
+      "currency": "TRY",
+      "balance_usd": 147.36613917190547,
+      "institution": "Wise TR",
+      "account_type": "checking",
+      "last_updated": "2026-06-10T11:53:12.886589Z"
+    },
+    {
+      "id": "saving_007",
+      "name": "DE",
+      "balance": 18214.0,
+      "currency": "GBP",
+      "balance_usd": 24382.864792503347,
+      "institution": "Revolut UK",
+      "account_type": "checking",
+      "last_updated": "2026-06-10T11:53:12.886624Z"
+    },
+    {
+      "id": "saving_008",
+      "name": "DE",
+      "balance": 4792.0,
+      "currency": "EUR",
+      "balance_usd": 5533.487297921478,
+      "institution": "Revolut Cash Funds",
+      "account_type": "checking",
+      "last_updated": "2026-06-10T11:53:12.886650Z"
+    },
+    {
+      "id": "saving_009",
+      "name": "DE",
+      "balance": 3034.0,
+      "currency": "EUR",
+      "balance_usd": 3503.4642032332563,
+      "institution": "Revolut Instant Access Savings",
+      "account_type": "checking",
+      "last_updated": "2026-06-10T11:53:12.886673Z"
+    },
+    {
+      "id": "saving_011",
+      "name": "IN",
+      "balance": 45187.0,
+      "currency": "INR",
+      "balance_usd": 473.60863641127764,
+      "institution": "ICICI Savings",
+      "account_type": "checking",
+      "last_updated": "2026-06-10T11:59:48.175819Z"
+    },
+    {
+      "id": "saving_012",
+      "name": "IN",
+      "balance": 907854.0,
+      "currency": "INR",
+      "balance_usd": 9515.291898123887,
+      "institution": "ICICI Deposits",
+      "account_type": "checking",
+      "last_updated": "2026-06-10T11:59:48.175846Z"
+    },
+    {
+      "id": "saving_013",
+      "name": "IN",
+      "balance": 302500.0,
+      "currency": "INR",
+      "balance_usd": 3170.527198406876,
+      "institution": "SBI",
+      "account_type": "checking",
+      "last_updated": "2026-06-10T12:01:56.566725Z"
+    },
+    {
+      "id": "saving_003",
+      "name": "DE",
+      "balance": 16839.0,
+      "currency": "EUR",
+      "balance_usd": 19200.684150513112,
+      "institution": "Deutsche Bank",
+      "account_type": "checking",
+      "last_updated": "2026-07-01T19:20:28.975832Z"
+    },
+    {
+      "id": "saving_006",
+      "name": "DE",
+      "balance": 4872.0,
+      "currency": "EUR",
+      "balance_usd": 5555.302166476625,
+      "institution": "Revolut",
+      "account_type": "checking",
+      "last_updated": "2026-07-01T19:20:28.975873Z"
+    },
+    {
+      "id": "saving_001",
+      "name": "LU",
+      "balance": 71776.0,
+      "currency": "EUR",
+      "balance_usd": 81842.64538198404,
+      "institution": "Spuerkeess",
+      "account_type": "checking",
+      "last_updated": "2026-07-01T19:25:11.258685Z"
+    },
+    {
+      "id": "saving_010",
+      "name": "LU",
+      "balance": 94228.0,
+      "currency": "EUR",
+      "balance_usd": 107812.35697940503,
+      "institution": "ING",
+      "account_type": "checking",
+      "last_updated": "2026-07-04T06:44:01.992266Z"
+    }
+  ],
+  "loans": [
+    {
+      "id": "loan_002",
+      "name": "Home loan",
+      "principal_amount": 283411.2,
+      "outstanding_principal": 236176.0,
+      "currency": "EUR",
+      "outstanding_usd": 269299.8859749145,
+      "interest_rate": 3.5,
+      "lender": "Bank",
+      "loan_type": "personal",
+      "monthly_payment": 2361.76,
+      "start_date": "2023-01-01",
+      "term_months": 360,
+      "last_updated": "2026-07-01T19:23:48.480637Z"
+    }
+  ],
+  "real_estate": [
+    {
+      "id": "realestate_001",
+      "name": "Lux Apartment",
+      "market_value": 320000.0,
+      "currency": "EUR",
+      "market_value_usd": 369515.0115473441,
+      "address": "Not specified",
+      "purchase_price": 288000.0,
+      "purchase_date": "2023-01-01",
+      "property_type": "residential",
+      "last_updated": "2026-06-10T11:47:48.972315Z"
+    }
+  ],
+  "investments": {
+    "stocks": [
+      {
+        "id": "stock_001",
+        "symbol": "DASH",
+        "shares": 90.0,
+        "currency": "USD",
+        "market_value": 17280.899999999998,
+        "last_updated": "2026-07-04T06:54:50.386855Z"
+      },
+      {
+        "id": "stock_002",
+        "symbol": "DASH",
+        "shares": 155.0,
+        "currency": "USD",
+        "market_value": 29761.55,
+        "last_updated": "2026-07-04T06:54:51.072540Z"
+      },
+      {
+        "id": "stock_003",
+        "symbol": "AMZN",
+        "shares": 2315.0,
+        "currency": "USD",
+        "market_value": 561781.0499999999,
+        "last_updated": "2026-07-04T06:54:51.958577Z"
+      },
+      {
+        "id": "stock_004",
+        "symbol": "NVDA",
+        "shares": 16.7,
+        "currency": "USD",
+        "market_value": 3253.661,
+        "last_updated": "2026-07-04T06:54:52.720407Z"
+      },
+      {
+        "id": "stock_005",
+        "symbol": "MSFT",
+        "shares": 6.0,
+        "currency": "USD",
+        "market_value": 2342.94,
+        "last_updated": "2026-07-04T06:54:53.483019Z"
+      },
+      {
+        "id": "stock_006",
+        "symbol": "AAPL",
+        "shares": 5.0,
+        "currency": "USD",
+        "market_value": 1543.15,
+        "last_updated": "2026-07-04T06:54:54.247234Z"
+      },
+      {
+        "id": "stock_007",
+        "symbol": "TSLA",
+        "shares": 3.5,
+        "currency": "USD",
+        "market_value": 1377.075,
+        "last_updated": "2026-07-04T06:54:55.009838Z"
+      },
+      {
+        "id": "stock_008",
+        "symbol": "META",
+        "shares": 2.0,
+        "currency": "USD",
+        "market_value": 1165.8,
+        "last_updated": "2026-07-04T06:54:55.787604Z"
+      },
+      {
+        "id": "stock_009",
+        "symbol": "DIS",
+        "shares": 8.0,
+        "currency": "USD",
+        "market_value": 796.0,
+        "last_updated": "2026-07-04T06:54:56.548482Z"
+      },
+      {
+        "id": "stock_010",
+        "symbol": "BABA",
+        "shares": 4.55,
+        "currency": "USD",
+        "market_value": 437.437,
+        "last_updated": "2026-07-04T06:54:57.422285Z"
+      },
+      {
+        "id": "stock_011",
+        "symbol": "ADSK",
+        "shares": 1.0,
+        "currency": "USD",
+        "market_value": 207.48,
+        "last_updated": "2026-07-04T06:54:58.235871Z"
+      },
+      {
+        "id": "stock_012",
+        "symbol": "RBLX",
+        "shares": 4.0,
+        "currency": "USD",
+        "market_value": 221.64,
+        "last_updated": "2026-07-04T06:54:59.162687Z"
+      },
+      {
+        "id": "stock_013",
+        "symbol": "ASTS",
+        "shares": 41.95,
+        "currency": "USD",
+        "market_value": 3571.2035,
+        "last_updated": "2026-07-04T06:54:59.982880Z"
+      }
+    ],
+    "cryptos": [
+      {
+        "id": "crypto_001",
+        "symbol": "BTC",
+        "amount": 0.1,
+        "currency": "USD",
+        "market_value": 6241.176,
+        "last_updated": "2026-07-04T06:55:00.725047Z"
+      },
+      {
+        "id": "crypto_002",
+        "symbol": "ETH",
+        "amount": 2.0,
+        "currency": "USD",
+        "market_value": 3493.6,
+        "last_updated": "2026-07-04T06:55:01.541010Z"
+      },
+      {
+        "id": "crypto_003",
+        "symbol": "SOL",
+        "amount": 10.0,
+        "currency": "USD",
+        "market_value": 819.4,
+        "last_updated": "2026-07-04T06:55:02.285616Z"
+      },
+      {
+        "id": "crypto_004",
+        "symbol": "USDC",
+        "amount": 311.08,
+        "currency": "USD",
+        "market_value": 311.03511115599997,
+        "last_updated": "2026-07-04T06:55:03.055538Z"
+      },
+      {
+        "id": "crypto_005",
+        "symbol": "SHIB",
+        "amount": 31200000.0,
+        "currency": "USD",
+        "market_value": 137.28,
+        "last_updated": "2026-07-04T06:55:03.841327Z"
+      },
+      {
+        "id": "crypto_006",
+        "symbol": "XLM",
+        "amount": 200.0,
+        "currency": "USD",
+        "market_value": 41.058,
+        "last_updated": "2026-07-04T06:55:04.590081Z"
+      },
+      {
+        "id": "crypto_008",
+        "symbol": "FET",
+        "amount": 100.0,
+        "currency": "USD",
+        "market_value": 18.65,
+        "last_updated": "2026-07-04T06:55:05.326464Z"
+      },
+      {
+        "id": "crypto_009",
+        "symbol": "FLOKI",
+        "amount": 444000.0,
+        "currency": "USD",
+        "market_value": 10.5672,
+        "last_updated": "2026-07-04T06:55:06.229750Z"
+      },
+      {
+        "id": "crypto_010",
+        "symbol": "ADA",
+        "amount": 60.0,
+        "currency": "USD",
+        "market_value": 10.686,
+        "last_updated": "2026-07-04T06:55:07.047925Z"
+      },
+      {
+        "id": "crypto_011",
+        "symbol": "BTC",
+        "amount": 0.1,
+        "currency": "USD",
+        "market_value": 6239.945,
+        "last_updated": "2026-07-04T06:55:07.865062Z"
+      },
+      {
+        "id": "crypto_012",
+        "symbol": "TRX",
+        "amount": 839.0,
+        "currency": "USD",
+        "market_value": 271.4309308,
+        "last_updated": "2026-07-04T06:55:08.613917Z"
+      }
+    ]
+  },
+  "recurring_transactions": {
+    "income": [],
+    "expenses": []
+  }
+}

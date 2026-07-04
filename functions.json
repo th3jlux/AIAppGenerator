@@ -10,5 +10,11 @@
         "href": "/Pdf_Merge_Split_html",
         "template": "Pdf_Merge_Split_html.html",
         "python_file": "Pdf_Merge_Split_python.py"
+    },
+    {
+        "bluePrint": "document_quality_blueprint",
+        "href": "/document_quality_html",
+        "template": "document_quality_html.html",
+        "python_file": "document_quality_python.py"
     }
 ]

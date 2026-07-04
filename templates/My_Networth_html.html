@@ -327,10 +327,9 @@
                 <div class="currency-selector">
                     <label for="currencySelect">Display Currency: </label>
                     <select id="currencySelect" onchange="changeCurrency()">
-                        <option value="USD" {{ 'selected' if currency == 'USD' else '' }}>USD</option>
-                        <option value="EUR" {{ 'selected' if currency == 'EUR' else '' }}>EUR</option>
-                        <option value="INR" {{ 'selected' if currency == 'INR' else '' }}>INR</option>
-                        <option value="TRY" {{ 'selected' if currency == 'TRY' else '' }}>TRY</option>
+                        {% for ccy in (supported_currencies or ['USD','EUR','INR','TRY','GBP']) %}
+                        <option value="{{ ccy }}" {{ 'selected' if currency == ccy else '' }}>{{ ccy }}</option>
+                        {% endfor %}
                     </select>
                     <button id="refreshButton" class="btn" style="margin-left: 15px;">Refresh Prices</button>
                 </div>
@@ -390,6 +389,20 @@
             </div>
 
             
+        </div>
+
+        <!-- Net Worth Trend -->
+        <div class="category-section" style="margin-bottom: 30px;">
+            <div class="category-header">
+                <span><span class="category-icon">📊</span>Net Worth Over Time</span>
+                <span class="total" id="trendChange" style="background: rgba(255,255,255,0.1); color: #9ca3af;">—</span>
+            </div>
+            <div class="category-content" style="padding: 20px;">
+                <div id="trendEmpty" style="display:none; text-align:center; color:#9ca3af; padding:20px;">
+                    Not enough history yet — snapshots are recorded each day you open this page.
+                </div>
+                <canvas id="netWorthChart" height="90"></canvas>
+            </div>
         </div>
 
         <!-- Investments Section -->
@@ -694,9 +707,95 @@
             }
         }
 
+        // ---- Edit entry ----------------------------------------------------
+        const EDIT_CURRENCIES = ['USD', 'EUR', 'INR', 'TRY', 'GBP'];
+        const EDIT_FIELDS = {
+            stocks:      [{k:'symbol', label:'Symbol', type:'text'}, {k:'shares', label:'Shares', type:'number', step:'any'}],
+            cryptos:     [{k:'symbol', label:'Symbol', type:'text'}, {k:'amount', label:'Amount', type:'number', step:'any'}],
+            savings:     [{k:'name', label:'Account name', type:'text'}, {k:'balance', label:'Balance', type:'number', step:'any'}, {k:'currency', label:'Currency', type:'currency'}, {k:'institution', label:'Institution', type:'text'}],
+            loans:       [{k:'name', label:'Loan name', type:'text'}, {k:'outstanding_principal', label:'Outstanding', type:'number', step:'any'}, {k:'currency', label:'Currency', type:'currency'}, {k:'interest_rate', label:'Interest rate (%)', type:'number', step:'any'}, {k:'monthly_payment', label:'Monthly payment', type:'number', step:'any'}],
+            real_estate: [{k:'name', label:'Property name', type:'text'}, {k:'market_value', label:'Market value', type:'number', step:'any'}, {k:'currency', label:'Currency', type:'currency'}, {k:'address', label:'Address', type:'text'}],
+        };
+        const EDIT_TITLES = {stocks:'Stock', cryptos:'Crypto', savings:'Savings Account', loans:'Loan', real_estate:'Property'};
+        let editCategory = null, editId = null;
+
         function editEntry(category, id) {
-            // TODO: Implement edit functionality
-            alert(`Edit ${category} entry ${id} - Feature coming soon!`);
+            const fields = EDIT_FIELDS[category];
+            if (!fields) { alert('This entry type cannot be edited.'); return; }
+            editCategory = category; editId = id;
+
+            // Pull current values from the live portfolio payload.
+            fetch('/api/portfolio')
+                .then(r => r.json())
+                .then(data => {
+                    const list = (category === 'stocks' || category === 'cryptos') ? data[category] : data[category];
+                    const item = (list || []).find(x => x.id === id);
+                    if (!item) { alert('Entry not found.'); return; }
+
+                    document.getElementById('editModalTitle').textContent = 'Edit ' + (EDIT_TITLES[category] || category);
+                    const container = document.getElementById('editFields');
+                    container.innerHTML = '';
+                    const inputStyle = 'width:100%; padding:8px; margin-top:5px; background:#3a3a3a; color:#e1e5e9; border:1px solid #4a4a4a; border-radius:4px;';
+
+                    fields.forEach(f => {
+                        const wrap = document.createElement('div');
+                        wrap.style.marginBottom = '15px';
+                        const label = document.createElement('label');
+                        label.textContent = f.label + ':';
+                        wrap.appendChild(label);
+
+                        let input;
+                        const current = item[f.k];
+                        if (f.type === 'currency') {
+                            input = document.createElement('select');
+                            EDIT_CURRENCIES.forEach(c => {
+                                const o = document.createElement('option');
+                                o.value = c; o.textContent = c;
+                                if (c === current) o.selected = true;
+                                input.appendChild(o);
+                            });
+                        } else {
+                            input = document.createElement('input');
+                            input.type = f.type;
+                            if (f.step) input.step = f.step;
+                            input.value = (current === null || current === undefined) ? '' : current;
+                        }
+                        input.id = 'editField_' + f.k;
+                        input.style.cssText = inputStyle;
+                        wrap.appendChild(input);
+                        container.appendChild(wrap);
+                    });
+
+                    document.getElementById('editModal').style.display = 'flex';
+                })
+                .catch(err => alert('Could not load entry: ' + err));
+        }
+
+        function hideEditModal() {
+            document.getElementById('editModal').style.display = 'none';
+            editCategory = null; editId = null;
+        }
+
+        function submitEdit(e) {
+            e.preventDefault();
+            const payload = {category: editCategory, id: editId};
+            (EDIT_FIELDS[editCategory] || []).forEach(f => {
+                const el = document.getElementById('editField_' + f.k);
+                if (el) payload[f.k] = el.value;
+            });
+            const btn = document.getElementById('editSaveBtn');
+            btn.disabled = true; btn.textContent = 'Saving…';
+            fetch('/api/portfolio/update', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(payload)
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.ok) { location.reload(); }
+                else { alert('Error saving: ' + (data.error || 'unknown')); btn.disabled = false; btn.textContent = 'Save'; }
+            })
+            .catch(err => { alert('Error saving: ' + err); btn.disabled = false; btn.textContent = 'Save'; });
         }
 
         function deleteEntry(category, id) {
@@ -751,6 +850,91 @@
         });
     </script>
 
+    <!-- Net worth trend chart -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+    <script>
+        const NW_CURRENCY = {{ currency|tojson }};
+        const NW_SYMBOL = {{ get_currency_symbol(currency)|tojson }};
+
+        function fmtMoney(v) {
+            try { return NW_SYMBOL + Number(v).toLocaleString(undefined, {maximumFractionDigits: 0}); }
+            catch (e) { return NW_SYMBOL + v; }
+        }
+
+        document.addEventListener('DOMContentLoaded', function () {
+            fetch('/api/portfolio/history?currency=' + encodeURIComponent(NW_CURRENCY))
+                .then(r => r.json())
+                .then(data => {
+                    const history = (data && data.history) || [];
+                    const canvas = document.getElementById('netWorthChart');
+                    const empty = document.getElementById('trendEmpty');
+                    if (history.length < 2) {
+                        if (canvas) canvas.style.display = 'none';
+                        if (empty) empty.style.display = 'block';
+                        return;
+                    }
+                    const labels = history.map(h => h.date);
+                    const values = history.map(h => h.grand_total);
+
+                    // Header change indicator (first -> last)
+                    const first = values[0], last = values[values.length - 1];
+                    const diff = last - first;
+                    const badge = document.getElementById('trendChange');
+                    if (badge) {
+                        const pct = first ? (diff / Math.abs(first) * 100) : 0;
+                        const up = diff >= 0;
+                        badge.textContent = (up ? '▲ ' : '▼ ') + fmtMoney(Math.abs(diff)) +
+                            ' (' + (up ? '+' : '−') + Math.abs(pct).toFixed(1) + '%)';
+                        badge.style.color = up ? '#52a963' : '#e07a7a';
+                    }
+
+                    const ctx = canvas.getContext('2d');
+                    const grad = ctx.createLinearGradient(0, 0, 0, 240);
+                    grad.addColorStop(0, 'rgba(74,144,226,0.35)');
+                    grad.addColorStop(1, 'rgba(74,144,226,0.0)');
+                    new Chart(ctx, {
+                        type: 'line',
+                        data: {
+                            labels: labels,
+                            datasets: [{
+                                label: 'Net Worth (' + NW_CURRENCY + ')',
+                                data: values,
+                                borderColor: '#4a90e2',
+                                backgroundColor: grad,
+                                fill: true, tension: 0.25, pointRadius: 2, borderWidth: 2,
+                            }]
+                        },
+                        options: {
+                            responsive: true, maintainAspectRatio: true,
+                            plugins: {
+                                legend: { display: false },
+                                tooltip: { callbacks: { label: c => fmtMoney(c.parsed.y) } }
+                            },
+                            scales: {
+                                x: { ticks: { color: '#9ca3af', maxTicksLimit: 8 }, grid: { color: 'rgba(255,255,255,0.05)' } },
+                                y: { ticks: { color: '#9ca3af', callback: v => fmtMoney(v) }, grid: { color: 'rgba(255,255,255,0.05)' } }
+                            }
+                        }
+                    });
+                })
+                .catch(err => console.error('Error loading history:', err));
+        });
+    </script>
+
+    <!-- Edit Entry Modal -->
+    <div id="editModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 1000; align-items: center; justify-content: center;">
+        <div style="background: #2d2d2d; border-radius: 12px; padding: 30px; max-width: 480px; width: 90%; color: #e1e5e9;">
+            <h3 id="editModalTitle">Edit Entry</h3>
+            <form id="editForm" onsubmit="submitEdit(event)">
+                <div id="editFields"></div>
+                <div style="text-align: right; gap: 10px; display: flex; justify-content: flex-end; margin-top: 10px;">
+                    <button type="button" onclick="hideEditModal()" style="background: #6c757d; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer;">Cancel</button>
+                    <button type="submit" id="editSaveBtn" style="background: #4a90e2; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer;">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <!-- Recurring Transaction Modal -->
     <div id="recurringModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 1000; align-items: center; justify-content: center;">
         <div style="background: #2d2d2d; border-radius: 12px; padding: 30px; max-width: 500px; width: 90%; color: #e1e5e9;">
@@ -773,6 +957,7 @@
                             <option value="EUR">EUR</option>
                             <option value="INR">INR</option>
                             <option value="TRY">TRY</option>
+                            <option value="GBP">GBP</option>
                         </select>
                     </div>
                 </div>
@@ -966,7 +1151,10 @@
             container.appendChild(table);
         }
 
+        let editingRecurringId = null;
+
         function showAddRecurringForm(type) {
+            editingRecurringId = null;
             currentRecurringType = type;
             document.getElementById('modalTitle').textContent = `Add Recurring ${type === 'income' ? 'Income' : 'Expense'}`;
             document.getElementById('accountLabel').textContent = type === 'income' ? 'Target Account:' : 'Source Account:';
@@ -1012,8 +1200,15 @@
                 formData.category = document.getElementById('recurringCategory').value;
             }
 
-            const endpoint = `/api/recurring/${currentRecurringType}/add`;
-            
+            let endpoint;
+            if (editingRecurringId) {
+                endpoint = '/api/recurring/update';
+                formData.type = currentRecurringType;
+                formData.id = editingRecurringId;
+            } else {
+                endpoint = `/api/recurring/${currentRecurringType}/add`;
+            }
+
             fetch(endpoint, {
                 method: 'POST',
                 headers: {
@@ -1027,11 +1222,11 @@
                     hideRecurringModal();
                     loadRecurringTransactions();
                 } else {
-                    alert('Error adding recurring transaction: ' + data.error);
+                    alert('Error saving recurring transaction: ' + data.error);
                 }
             })
             .catch(error => {
-                alert('Error adding recurring transaction: ' + error);
+                alert('Error saving recurring transaction: ' + error);
             });
         });
 
@@ -1062,8 +1257,30 @@
         }
 
         function editRecurringTransaction(type, id) {
-            // TODO: Implement edit functionality for recurring transactions
-            alert(`Edit recurring ${type} ${id} - Feature coming soon!`);
+            const list = type === 'income' ? recurringTransactions.income : recurringTransactions.expenses;
+            const item = (list || []).find(x => x.id === id);
+            if (!item) { alert('Transaction not found.'); return; }
+
+            currentRecurringType = type;
+            editingRecurringId = id;
+            document.getElementById('modalTitle').textContent = `Edit Recurring ${type === 'income' ? 'Income' : 'Expense'}`;
+            document.getElementById('accountLabel').textContent = type === 'income' ? 'Target Account:' : 'Source Account:';
+            document.getElementById('categoryDiv').style.display = type === 'expense' ? 'block' : 'none';
+
+            document.getElementById('recurringName').value = item.name || '';
+            document.getElementById('recurringAmount').value = item.amount != null ? item.amount : '';
+            document.getElementById('recurringCurrency').value = item.currency || 'USD';
+            document.getElementById('recurringFrequency').value = item.frequency || 'monthly';
+            document.getElementById('recurringStartDate').value = item.start_date || new Date().toISOString().split('T')[0];
+            document.getElementById('recurringDescription').value = item.description || '';
+            if (type === 'expense') {
+                document.getElementById('recurringCategory').value = item.category || 'general';
+            }
+            const acctVal = type === 'income' ? item.target_account_id : item.source_account_id;
+            const acctSel = document.getElementById('recurringAccount');
+            if (acctVal) acctSel.value = acctVal;
+
+            document.getElementById('recurringModal').style.display = 'flex';
         }
     </script>
 </body>

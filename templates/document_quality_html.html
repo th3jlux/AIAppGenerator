@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="document-upload">
+    <h2>Document Quality Checker</h2>
+    <form method="post" action="/document_quality_html" enctype="multipart/form-data">
+        <div class="input-group">
+            <label for="document">Upload your document:</label>
+            <input type="file" name="document" id="document" accept=".txt,.docx" required>
+        </div>
+        <button type="submit" class="btn-submit">Check Quality</button>
+    </form>
+
+    <style scoped>
+        .document-upload {
+            max-width: 500px;
+            margin: 0 auto;
+            padding: 1em;
+            border-radius: 5px;
+            background-color: #f7f7f7;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        }
+        .document-upload h2 {
+            margin-bottom: 1em;
+            text-align: center;
+        }
+        .input-group {
+            margin-bottom: 1em;
+        }
+        .input-group label {
+            display: block;
+            margin-bottom: 0.5em;
+        }
+        .input-group input {
+            width: 100%;
+            padding: 0.5em;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        .btn-submit {
+            padding: 0.7em 2em;
+            color: #fff;
+            background-color: #007BFF;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+            width: 100%;
+        }
+        .btn-submit:hover {
+            background-color: #0056b3;
+        }
+    </style>
+</div>
+{% endblock %}

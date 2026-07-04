@@ -1,0 +1,17 @@
+[
+  {
+    "date": "2026-07-04",
+    "timestamp": "2026-07-04T01:40:48.734986+00:00",
+    "currency": "USD",
+    "grand_total": 1025433.84,
+    "breakdown": {
+      "stocks": 623739.89,
+      "cryptos": 17594.83,
+      "savings": 288190.66,
+      "loans": -270224.26,
+      "real_estate": 366132.72,
+      "net_cash": 17966.41,
+      "grand_total": 1025433.84
+    }
+  }
+]
