@@ -169,8 +169,8 @@ helper_scripts/
 data/.DS_Store
 data/progress2.json
 data/completed.json
-data/networth.json
 data/progress.json
 .DS_Store
 git_skip_helper.py
 data/networth.json
+data/networth_history.json
