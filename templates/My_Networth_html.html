@@ -595,6 +595,26 @@
             </div>
         </div>
 
+        <!-- Recurring cash-flow summary -->
+        <h3 style="text-align:center; margin: 10px 0 18px; color:#e1e5e9; font-weight:500;">
+            🔄 Recurring &amp; Forecast
+        </h3>
+        <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap:16px; margin-bottom:24px;">
+            <div class="summary-card">
+                <div style="color:#9ca3af; font-size:0.85em; margin-bottom:6px;">Monthly Income</div>
+                <div id="cfIncome" class="stat-positive" style="font-size:1.5em; font-weight:400;">—</div>
+            </div>
+            <div class="summary-card">
+                <div style="color:#9ca3af; font-size:0.85em; margin-bottom:6px;">Monthly Expenses</div>
+                <div id="cfExpenses" class="stat-negative" style="font-size:1.5em; font-weight:400;">—</div>
+            </div>
+            <div class="summary-card">
+                <div style="color:#9ca3af; font-size:0.85em; margin-bottom:6px;">Net / Month</div>
+                <div id="cfNet" style="font-size:1.5em; font-weight:400;">—</div>
+                <div id="cfAnnual" style="color:#9ca3af; font-size:0.8em; margin-top:4px;"></div>
+            </div>
+        </div>
+
         <!-- Recurring Transactions Section -->
         <div class="category-grid">
             <!-- Recurring Income Section -->
@@ -633,6 +653,16 @@
                         </div>
                     </div>
                 </div>
+            </div>
+        </div>
+
+        <!-- Upcoming schedule -->
+        <div class="category-section" style="margin-bottom: 30px;">
+            <div class="category-header">
+                <span><span class="category-icon">🗓️</span>Upcoming (next occurrences)</span>
+            </div>
+            <div class="category-content">
+                <div id="upcomingList" style="padding: 20px; color:#9ca3af; text-align:center;">Loading…</div>
             </div>
         </div>
 
@@ -861,61 +891,99 @@
             catch (e) { return NW_SYMBOL + v; }
         }
 
+        // Render actual history + a dashed forward projection. Called once
+        // history loads and again once the recurring projection arrives.
+        window.__renderTrend = function () {
+            const history = window.__history || [];
+            const projection = window.__projection || [];
+            const canvas = document.getElementById('netWorthChart');
+            const empty = document.getElementById('trendEmpty');
+            if (!canvas) return;
+            if ((history.length + projection.length) < 2) {
+                canvas.style.display = 'none';
+                if (empty) empty.style.display = 'block';
+                return;
+            }
+            canvas.style.display = '';
+            if (empty) empty.style.display = 'none';
+
+            const actualDates = history.map(h => h.date);
+            const actualVals = history.map(h => h.grand_total);
+            const lastDate = actualDates.length ? actualDates[actualDates.length - 1] : null;
+            const lastVal = actualVals.length ? actualVals[actualVals.length - 1]
+                : (projection[0] ? projection[0].net_worth : 0);
+
+            const projFuture = projection.filter(p => !lastDate || p.date > lastDate);
+            const projDates = projFuture.map(p => p.date);
+            const projVals = projFuture.map(p => p.net_worth);
+
+            const labels = actualDates.concat(projDates);
+            const actualData = actualVals.concat(projDates.map(() => null));
+            const projData = [];
+            for (let i = 0; i < actualDates.length; i++) {
+                projData.push(i === actualDates.length - 1 ? lastVal : null);
+            }
+            projVals.forEach(v => projData.push(v));
+
+            // Header badge: prefer actual change; else projected change.
+            const badge = document.getElementById('trendChange');
+            if (badge) {
+                let base, end, label;
+                if (actualVals.length >= 2) { base = actualVals[0]; end = actualVals[actualVals.length - 1]; label = ''; }
+                else { base = lastVal; end = projVals.length ? projVals[projVals.length - 1] : lastVal; label = ' (proj.)'; }
+                const diff = end - base;
+                const pct = base ? (diff / Math.abs(base) * 100) : 0;
+                const up = diff >= 0;
+                badge.textContent = (up ? '▲ ' : '▼ ') + fmtMoney(Math.abs(diff)) +
+                    ' (' + (up ? '+' : '−') + Math.abs(pct).toFixed(1) + '%)' + label;
+                badge.style.color = up ? '#52a963' : '#e07a7a';
+            }
+
+            const ctx = canvas.getContext('2d');
+            const grad = ctx.createLinearGradient(0, 0, 0, 240);
+            grad.addColorStop(0, 'rgba(74,144,226,0.35)');
+            grad.addColorStop(1, 'rgba(74,144,226,0.0)');
+
+            if (window.__nwChart) window.__nwChart.destroy();
+            window.__nwChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Net Worth (' + NW_CURRENCY + ')',
+                            data: actualData,
+                            borderColor: '#4a90e2', backgroundColor: grad,
+                            fill: true, tension: 0.25, pointRadius: 2, borderWidth: 2, spanGaps: false,
+                        },
+                        {
+                            label: 'Projected',
+                            data: projData,
+                            borderColor: '#8a9ba8', borderDash: [6, 5],
+                            fill: false, tension: 0.25, pointRadius: 0, borderWidth: 2, spanGaps: true,
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: true,
+                    plugins: {
+                        legend: { display: true, labels: { color: '#9ca3af', boxWidth: 18 } },
+                        tooltip: { callbacks: { label: c => (c.dataset.label ? c.dataset.label.split(' (')[0] + ': ' : '') + fmtMoney(c.parsed.y) } }
+                    },
+                    scales: {
+                        x: { ticks: { color: '#9ca3af', maxTicksLimit: 10 }, grid: { color: 'rgba(255,255,255,0.05)' } },
+                        y: { ticks: { color: '#9ca3af', callback: v => fmtMoney(v) }, grid: { color: 'rgba(255,255,255,0.05)' } }
+                    }
+                }
+            });
+        };
+
         document.addEventListener('DOMContentLoaded', function () {
             fetch('/api/portfolio/history?currency=' + encodeURIComponent(NW_CURRENCY))
                 .then(r => r.json())
                 .then(data => {
-                    const history = (data && data.history) || [];
-                    const canvas = document.getElementById('netWorthChart');
-                    const empty = document.getElementById('trendEmpty');
-                    if (history.length < 2) {
-                        if (canvas) canvas.style.display = 'none';
-                        if (empty) empty.style.display = 'block';
-                        return;
-                    }
-                    const labels = history.map(h => h.date);
-                    const values = history.map(h => h.grand_total);
-
-                    // Header change indicator (first -> last)
-                    const first = values[0], last = values[values.length - 1];
-                    const diff = last - first;
-                    const badge = document.getElementById('trendChange');
-                    if (badge) {
-                        const pct = first ? (diff / Math.abs(first) * 100) : 0;
-                        const up = diff >= 0;
-                        badge.textContent = (up ? '▲ ' : '▼ ') + fmtMoney(Math.abs(diff)) +
-                            ' (' + (up ? '+' : '−') + Math.abs(pct).toFixed(1) + '%)';
-                        badge.style.color = up ? '#52a963' : '#e07a7a';
-                    }
-
-                    const ctx = canvas.getContext('2d');
-                    const grad = ctx.createLinearGradient(0, 0, 0, 240);
-                    grad.addColorStop(0, 'rgba(74,144,226,0.35)');
-                    grad.addColorStop(1, 'rgba(74,144,226,0.0)');
-                    new Chart(ctx, {
-                        type: 'line',
-                        data: {
-                            labels: labels,
-                            datasets: [{
-                                label: 'Net Worth (' + NW_CURRENCY + ')',
-                                data: values,
-                                borderColor: '#4a90e2',
-                                backgroundColor: grad,
-                                fill: true, tension: 0.25, pointRadius: 2, borderWidth: 2,
-                            }]
-                        },
-                        options: {
-                            responsive: true, maintainAspectRatio: true,
-                            plugins: {
-                                legend: { display: false },
-                                tooltip: { callbacks: { label: c => fmtMoney(c.parsed.y) } }
-                            },
-                            scales: {
-                                x: { ticks: { color: '#9ca3af', maxTicksLimit: 8 }, grid: { color: 'rgba(255,255,255,0.05)' } },
-                                y: { ticks: { color: '#9ca3af', callback: v => fmtMoney(v) }, grid: { color: 'rgba(255,255,255,0.05)' } }
-                            }
-                        }
-                    });
+                    window.__history = (data && data.history) || [];
+                    window.__renderTrend();
                 })
                 .catch(err => console.error('Error loading history:', err));
         });
@@ -976,6 +1044,10 @@
                         <label>Start Date:</label>
                         <input type="date" id="recurringStartDate" required style="width: 100%; padding: 8px; margin-top: 5px; background: #3a3a3a; color: #e1e5e9; border: 1px solid #4a4a4a; border-radius: 4px;">
                     </div>
+                    <div style="flex: 1;">
+                        <label>End Date <small style="color:#9ca3af;">(optional)</small>:</label>
+                        <input type="date" id="recurringEndDate" style="width: 100%; padding: 8px; margin-top: 5px; background: #3a3a3a; color: #e1e5e9; border: 1px solid #4a4a4a; border-radius: 4px;">
+                    </div>
                 </div>
 
                 <div style="margin-bottom: 15px;">
@@ -985,7 +1057,7 @@
                     </select>
                 </div>
 
-                <div style="margin-bottom: 20px;" id="categoryDiv" style="display: none;">
+                <div id="categoryDiv" style="margin-bottom: 20px; display: none;">
                     <label>Category:</label>
                     <select id="recurringCategory" style="width: 100%; padding: 8px; margin-top: 5px; background: #3a3a3a; color: #e1e5e9; border: 1px solid #4a4a4a; border-radius: 4px;">
                         <option value="general">General</option>
@@ -1023,7 +1095,46 @@
         document.addEventListener('DOMContentLoaded', function() {
             loadRecurringTransactions();
             loadAccounts();
+            loadRecurringSummary();
         });
+
+        function loadRecurringSummary() {
+            fetch('/api/recurring/summary?currency=' + encodeURIComponent(NW_CURRENCY))
+                .then(r => r.json())
+                .then(s => {
+                    const sym = NW_SYMBOL;
+                    const money = v => sym + Number(v).toLocaleString(undefined, {maximumFractionDigits: 0});
+                    document.getElementById('cfIncome').textContent = '+' + money(s.monthly_income);
+                    document.getElementById('cfExpenses').textContent = '−' + money(s.monthly_expenses);
+                    const net = document.getElementById('cfNet');
+                    net.textContent = (s.monthly_net >= 0 ? '+' : '−') + money(Math.abs(s.monthly_net));
+                    net.className = s.monthly_net >= 0 ? 'stat-positive' : 'stat-negative';
+                    document.getElementById('cfAnnual').textContent =
+                        (s.annual_net >= 0 ? '+' : '−') + money(Math.abs(s.annual_net)) + ' / year';
+
+                    const list = document.getElementById('upcomingList');
+                    if (!s.upcoming || s.upcoming.length === 0) {
+                        list.innerHTML = 'No upcoming recurring transactions. Add income or expenses above to see a forecast.';
+                    } else {
+                        const rows = s.upcoming.map(u => {
+                            const income = u.type === 'income';
+                            const color = income ? '#52a963' : '#e07a7a';
+                            const sign = income ? '+' : '−';
+                            return `<tr>
+                                <td style="padding:8px 12px;">${u.date}</td>
+                                <td style="padding:8px 12px;"><strong>${u.name}</strong></td>
+                                <td style="padding:8px 12px; text-align:right; color:${color};">${sign}${money(Math.abs(u.amount))}</td>
+                            </tr>`;
+                        }).join('');
+                        list.innerHTML = `<table class="category-table"><tbody>${rows}</tbody></table>`;
+                        list.style.padding = '0';
+                        list.style.textAlign = 'left';
+                    }
+                    window.__projection = s.projection || [];
+                    if (window.__renderTrend) window.__renderTrend();
+                })
+                .catch(err => console.error('Error loading recurring summary:', err));
+        }
 
         function loadAccounts() {
             // Extract accounts from the savings data already available
@@ -1078,6 +1189,7 @@
                     <tr>
                         <th style="width: 30px;"></th>
                         <th style="width: 30px;"></th>
+                        <th style="width: 30px;"></th>
                         <th>Name</th>
                         <th>Amount</th>
                         <th>Frequency</th>
@@ -1086,25 +1198,46 @@
                     </tr>
                 </thead>
                 <tbody>
-                    ${income.map(item => `
-                        <tr>
-                            <td>
-                                <button class="btn btn-small danger" onclick="deleteRecurringTransaction('income', '${item.id}')" style="padding: 4px 8px; font-size: 12px;" title="Delete">✕</button>
-                            </td>
-                            <td>
-                                <button class="btn btn-small" onclick="editRecurringTransaction('income', '${item.id}')" style="padding: 4px 8px; font-size: 12px;" title="Edit">✏️</button>
-                            </td>
-                            <td><strong>${item.name}</strong></td>
-                            <td>${item.amount} ${item.currency}</td>
-                            <td>${item.frequency}</td>
-                            <td>${item.next_due_date}</td>
-                            <td><small>${item.target_account_name || 'Unknown'}</small></td>
-                        </tr>
-                    `).join('')}
+                    ${income.map(item => recurringRow('income', item, item.target_account_name)).join('')}
                 </tbody>
             `;
             container.innerHTML = '';
             container.appendChild(table);
+        }
+
+        function recurringRow(type, item, accountName) {
+            const paused = item.is_active === false;
+            const pauseIcon = paused ? '▶' : '⏸';
+            const pauseTitle = paused ? 'Resume' : 'Pause';
+            const pausedBadge = paused
+                ? ' <span class="linking-indicator" style="background:#4a4a2d;color:#d4c98a;border-color:#6b6a4a;">Paused</span>'
+                : '';
+            const endsHint = item.end_date ? `<br><small style="color:#9ca3af;">ends ${item.end_date}</small>` : '';
+            return `
+                <tr style="${paused ? 'opacity:0.5;' : ''}">
+                    <td><button class="btn btn-small danger" onclick="deleteRecurringTransaction('${type}', '${item.id}')" style="padding: 4px 8px; font-size: 12px;" title="Delete">✕</button></td>
+                    <td><button class="btn btn-small" onclick="editRecurringTransaction('${type}', '${item.id}')" style="padding: 4px 8px; font-size: 12px;" title="Edit">✏️</button></td>
+                    <td><button class="btn btn-small" onclick="toggleRecurringActive('${type}', '${item.id}', ${!paused ? 'false' : 'true'})" style="padding: 4px 8px; font-size: 12px;" title="${pauseTitle}">${pauseIcon}</button></td>
+                    <td><strong>${item.name}</strong>${pausedBadge}</td>
+                    <td>${item.amount} ${item.currency}</td>
+                    <td>${item.frequency}${endsHint}</td>
+                    <td>${item.next_due_date}</td>
+                    <td><small>${accountName || 'Unknown'}</small></td>
+                </tr>`;
+        }
+
+        function toggleRecurringActive(type, id, activate) {
+            fetch('/api/recurring/update', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({type: type, id: id, is_active: activate})
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.ok) { loadRecurringTransactions(); loadRecurringSummary(); }
+                else { alert('Error: ' + (data.error || 'unknown')); }
+            })
+            .catch(err => alert('Error: ' + err));
         }
 
         function displayRecurringExpenses(expenses) {
@@ -1122,6 +1255,7 @@
                     <tr>
                         <th style="width: 30px;"></th>
                         <th style="width: 30px;"></th>
+                        <th style="width: 30px;"></th>
                         <th>Name</th>
                         <th>Amount</th>
                         <th>Frequency</th>
@@ -1130,21 +1264,7 @@
                     </tr>
                 </thead>
                 <tbody>
-                    ${expenses.map(item => `
-                        <tr>
-                            <td>
-                                <button class="btn btn-small danger" onclick="deleteRecurringTransaction('expense', '${item.id}')" style="padding: 4px 8px; font-size: 12px;" title="Delete">✕</button>
-                            </td>
-                            <td>
-                                <button class="btn btn-small" onclick="editRecurringTransaction('expense', '${item.id}')" style="padding: 4px 8px; font-size: 12px;" title="Edit">✏️</button>
-                            </td>
-                            <td><strong>${item.name}</strong></td>
-                            <td>${item.amount} ${item.currency}</td>
-                            <td>${item.frequency}</td>
-                            <td>${item.next_due_date}</td>
-                            <td><small>${item.source_account_name || 'Unknown'}</small></td>
-                        </tr>
-                    `).join('')}
+                    ${expenses.map(item => recurringRow('expense', item, item.source_account_name)).join('')}
                 </tbody>
             `;
             container.innerHTML = '';
@@ -1169,7 +1289,8 @@
             
             // Reset form
             document.getElementById('recurringForm').reset();
-            
+            document.getElementById('recurringEndDate').value = '';
+
             // Set default start date to today
             document.getElementById('recurringStartDate').value = new Date().toISOString().split('T')[0];
             
@@ -1190,6 +1311,7 @@
                 currency: document.getElementById('recurringCurrency').value,
                 frequency: document.getElementById('recurringFrequency').value,
                 start_date: document.getElementById('recurringStartDate').value,
+                end_date: document.getElementById('recurringEndDate').value || null,
                 description: document.getElementById('recurringDescription').value
             };
 
@@ -1272,6 +1394,7 @@
             document.getElementById('recurringCurrency').value = item.currency || 'USD';
             document.getElementById('recurringFrequency').value = item.frequency || 'monthly';
             document.getElementById('recurringStartDate').value = item.start_date || new Date().toISOString().split('T')[0];
+            document.getElementById('recurringEndDate').value = item.end_date || '';
             document.getElementById('recurringDescription').value = item.description || '';
             if (type === 'expense') {
                 document.getElementById('recurringCategory').value = item.category || 'general';

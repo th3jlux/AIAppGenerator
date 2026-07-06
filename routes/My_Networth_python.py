@@ -501,53 +501,136 @@ def calculate_next_due_date(current_date_str, frequency):
     return next_date.strftime("%Y-%m-%d")
 
 
-def is_transaction_due(due_date_str, last_processed_str=None):
-    today = now_utc().date()
-    due_date = datetime.strptime(due_date_str, "%Y-%m-%d").date()
-    if due_date > today:
+# Frequency -> number of occurrences per month (for steady-state cash flow).
+MONTHLY_FACTOR = {'weekly': 52.0 / 12.0, 'monthly': 1.0, 'quarterly': 1.0 / 3.0, 'yearly': 1.0 / 12.0}
+
+
+def _to_date(value):
+    try:
+        return datetime.strptime(value, "%Y-%m-%d").date()
+    except (ValueError, TypeError):
+        return None
+
+
+def _month_end(year, month):
+    if month >= 12:
+        return datetime(year, 12, 31).date()
+    return (datetime(year, month + 1, 1) - timedelta(days=1)).date()
+
+
+def is_active_on(item, on_date):
+    """True if the recurring item is active and within its start/end window."""
+    if not item.get('is_active', True):
         return False
-    if last_processed_str:
-        try:
-            if datetime.strptime(last_processed_str, "%Y-%m-%d").date() == today:
-                return False
-        except (ValueError, TypeError):
-            pass
+    start = _to_date(item.get('start_date'))
+    end = _to_date(item.get('end_date'))
+    if start and start > on_date:
+        # Not started yet: still "active" for headline purposes if it starts
+        # within a month; callers decide. Here we only gate on end_date.
+        pass
+    if end and end < on_date:
+        return False
     return True
 
 
-def process_recurring_transactions(portfolio_data):
-    """Apply due recurring income/expenses to account balances. Idempotent per day."""
-    recurring = portfolio_data.get('recurring_transactions', {'income': [], 'expenses': []})
-    rates = get_fx_rates()
-    today = now_utc().date().strftime("%Y-%m-%d")
-    processed = []
-    accounts = {a['id']: a for a in portfolio_data.get('savings', [])}
+def generate_occurrences(item, horizon_date, from_date=None):
+    """List of occurrence dates from `from_date` (default today) up to horizon.
 
-    def apply(txn, sign):
-        acct = accounts.get(txn.get('target_account_id') or txn.get('source_account_id'))
-        if not acct:
-            return None
-        amount_native = convert(txn['amount'], txn['currency'], acct['currency'], rates)
-        acct['balance'] += sign * amount_native
-        acct['balance_usd'] = to_usd(acct['balance'], acct['currency'], rates)
-        acct['last_updated'] = now_iso()
-        txn['last_processed'] = today
-        txn['next_due_date'] = calculate_next_due_date(txn['next_due_date'], txn['frequency'])
-        return {'type': 'income' if sign > 0 else 'expense', 'name': txn['name'],
-                'amount': txn['amount'], 'currency': txn['currency'],
-                'account': acct['name'], 'date': today}
+    Respects start_date, end_date and is_active. Never mutates the item and is
+    bounded so malformed data can't loop forever.
+    """
+    if not item.get('is_active', True):
+        return []
+    freq = item.get('frequency')
+    if freq not in MONTHLY_FACTOR:
+        return []
+    start = _to_date(item.get('start_date'))
+    if start is None:
+        return []
+    end = _to_date(item.get('end_date'))
+    window_start = from_date or now_utc().date()
 
-    for income in recurring.get('income', []):
-        if income.get('is_active', True) and is_transaction_due(income['next_due_date'], income.get('last_processed')):
-            r = apply(income, +1)
-            if r:
-                processed.append(r)
-    for expense in recurring.get('expenses', []):
-        if expense.get('is_active', True) and is_transaction_due(expense['next_due_date'], expense.get('last_processed')):
-            r = apply(expense, -1)
-            if r:
-                processed.append(r)
-    return processed
+    occurrences = []
+    d = start
+    guard = 0
+    # Fast-forward to the first occurrence on/after the window start.
+    while d < window_start and guard < 10000:
+        nxt = _to_date(calculate_next_due_date(d.strftime("%Y-%m-%d"), freq))
+        if nxt is None or nxt <= d:
+            return occurrences
+        d = nxt
+        guard += 1
+    # Collect occurrences within the horizon (and before end_date).
+    while d <= horizon_date and (end is None or d <= end) and guard < 10000:
+        occurrences.append(d)
+        nxt = _to_date(calculate_next_due_date(d.strftime("%Y-%m-%d"), freq))
+        if nxt is None or nxt <= d:
+            break
+        d = nxt
+        guard += 1
+    return occurrences
+
+
+def build_recurring_summary(portfolio_data, rates, display_currency, horizon_months=12):
+    """Cash-flow summary, upcoming schedule and net-worth projection.
+
+    Pure/read-only: computes a forecast from recurring items without touching
+    any account balance.
+    """
+    today = now_utc().date()
+    income = portfolio_data.get('recurring_transactions', {}).get('income', [])
+    expenses = portfolio_data.get('recurring_transactions', {}).get('expenses', [])
+
+    def monthly_rate(items):
+        total = 0.0
+        for it in items:
+            if not is_active_on(it, today):
+                continue
+            total += convert(it['amount'], it['currency'], display_currency, rates) * MONTHLY_FACTOR.get(it.get('frequency'), 0)
+        return total
+
+    monthly_income = monthly_rate(income)
+    monthly_expenses = monthly_rate(expenses)
+
+    # Horizon a little past the requested months so month-ends are covered.
+    horizon = today + timedelta(days=int(31 * horizon_months) + 5)
+
+    events = []  # (date, signed_amount_display, name, type)
+    for it in income:
+        amt = convert(it['amount'], it['currency'], display_currency, rates)
+        for d in generate_occurrences(it, horizon):
+            events.append((d, amt, it['name'], 'income'))
+    for it in expenses:
+        amt = convert(it['amount'], it['currency'], display_currency, rates)
+        for d in generate_occurrences(it, horizon):
+            events.append((d, -amt, it['name'], 'expense'))
+    events.sort(key=lambda e: e[0])
+
+    current_nw = build_payload(portfolio_data, display_currency, rates)['totals']['grand_total']
+
+    # Month-end projection points.
+    projection = [{'date': today.isoformat(), 'net_worth': round(current_nw, 2)}]
+    for m in range(1, horizon_months + 1):
+        total_month_index = (today.month - 1) + m
+        year = today.year + total_month_index // 12
+        month = total_month_index % 12 + 1
+        boundary = _month_end(year, month)
+        cum = sum(amt for (d, amt, _n, _t) in events if d <= boundary)
+        projection.append({'date': boundary.isoformat(), 'net_worth': round(current_nw + cum, 2)})
+
+    upcoming = [{'date': d.isoformat(), 'name': n, 'amount': round(amt, 2), 'type': t}
+                for (d, amt, n, t) in events if d >= today][:12]
+
+    return {
+        'currency': display_currency,
+        'monthly_income': round(monthly_income, 2),
+        'monthly_expenses': round(monthly_expenses, 2),
+        'monthly_net': round(monthly_income - monthly_expenses, 2),
+        'annual_net': round((monthly_income - monthly_expenses) * 12, 2),
+        'current_net_worth': round(current_nw, 2),
+        'projection': projection,
+        'upcoming': upcoming,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -958,14 +1041,21 @@ def _add_recurring(kind, account_field):
         frequency = body['frequency'].strip().lower()
         if frequency not in ('weekly', 'monthly', 'quarterly', 'yearly'):
             return jsonify({'error': f'Unsupported frequency: {frequency}'}), 400
+        amount = float(body['amount'])
+        if amount <= 0:
+            return jsonify({'error': "'amount' must be greater than 0"}), 400
+        end_date = body.get('end_date') or None
+        start = _to_date(body['start_date'])
+        if end_date and start and _to_date(end_date) and _to_date(end_date) < start:
+            return jsonify({'error': 'end_date cannot be before start_date'}), 400
         entry = {
             'id': get_next_id(f'recurring_{kind}', portfolio_data['recurring_transactions'][kind + ('s' if kind == 'expense' else '')]),
             'name': body['name'].strip(),
-            'amount': float(body['amount']),
+            'amount': amount,
             'currency': body['currency'].strip().upper(),
             'frequency': frequency,
             'start_date': body['start_date'],
-            'end_date': body.get('end_date'),
+            'end_date': end_date,
             'next_due_date': body['start_date'],
             account_field: body[account_field],
             'description': (body.get('description') or '').strip(),
@@ -1024,6 +1114,10 @@ def api_recurring_update():
             item['description'] = (body.get('description') or '').strip()
         if transaction_type == 'expense' and 'category' in body:
             item['category'] = (body.get('category') or 'general').strip()
+        if 'is_active' in body:
+            item['is_active'] = bool(body['is_active'])
+        if 'end_date' in body:
+            item['end_date'] = body['end_date'] or None
         if body.get(account_field):
             if not any(a['id'] == body[account_field] for a in portfolio_data.get('savings', [])):
                 return jsonify({'error': 'Account not found'}), 400
@@ -1071,19 +1165,13 @@ def api_recurring_delete():
         return jsonify({'error': str(e)}), 500
 
 
-@My_Networth_blueprint.route('/api/recurring/process', methods=['POST'])
-def api_recurring_process():
-    denied = guard()
-    if denied:
-        return denied
-    try:
-        portfolio_data = load_portfolio()
-        processed = process_recurring_transactions(portfolio_data)
-        if processed:
-            save_portfolio(portfolio_data)
-        return jsonify({'ok': True, 'processed_count': len(processed), 'transactions': processed})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+@My_Networth_blueprint.route('/api/recurring/summary', methods=['GET'])
+def api_recurring_summary():
+    """Forecast: monthly cash flow, upcoming schedule, and net-worth projection."""
+    portfolio_data = load_portfolio()
+    display_currency = (request.args.get('currency') or portfolio_data.get('currency', 'USD')).upper()
+    rates = get_fx_rates()
+    return jsonify(build_recurring_summary(portfolio_data, rates, display_currency))
 
 
 # ---------------------------------------------------------------------------
@@ -1227,12 +1315,8 @@ def calculate_net_worth():
             except Exception as e:
                 errors.append(f"An error occurred: {e}")
 
-    # Apply any due recurring transactions (idempotent per day) on full page load.
-    try:
-        if process_recurring_transactions(portfolio_data):
-            save_portfolio(portfolio_data)
-    except Exception as e:
-        errors.append(f"Error processing recurring transactions: {e}")
+    # Recurring income/expenses are forecast-only: they never mutate balances.
+    # See build_recurring_summary + /api/recurring/summary.
 
     # Refresh prices at most once per TTL (guarded, user-initiated navigation).
     if needs_refresh(portfolio_data.get('last_updated')):
