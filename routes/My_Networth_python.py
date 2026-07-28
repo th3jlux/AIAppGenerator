@@ -34,6 +34,7 @@ My_Networth_blueprint = Blueprint('My_Networth_blueprint', __name__)
 DATA_DIR = Path(__file__).parent.parent / 'data'
 DATA_FILE = DATA_DIR / 'networth.json'
 HISTORY_FILE = DATA_DIR / 'networth_history.json'
+LEDGER_FILE = DATA_DIR / 'networth_ledger.json'
 
 CURRENCY_API_URL = 'https://api.exchangerate-api.com/v4/latest/USD'
 PRICE_TTL_SECONDS = 60 * 60 * 24      # refresh security prices at most once/day
@@ -262,6 +263,57 @@ def load_history():
         except Exception as e:
             print(f"Error loading history: {e}")
             return []
+
+
+def load_ledger():
+    with _IO_LOCK:
+        if not LEDGER_FILE.exists():
+            return []
+        try:
+            with open(LEDGER_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                return data if isinstance(data, list) else []
+        except Exception as e:
+            print(f"Error loading ledger: {e}")
+            return []
+
+
+def append_ledger(entries):
+    if not entries:
+        return
+    with _IO_LOCK:
+        ledger = load_ledger()
+        ledger.extend(entries)
+        try:
+            _atomic_write(LEDGER_FILE, ledger)
+        except Exception as e:
+            print(f"Error saving ledger: {e}")
+
+
+def backfill_ledger_institutions(portfolio_data=None):
+    """Fill account_institution on older ledger entries that predate the field.
+
+    Resolves each entry's account_id against current savings and persists the
+    result once so the ledger is complete going forward.
+    """
+    with _IO_LOCK:
+        ledger = load_ledger()
+        if not ledger:
+            return ledger
+        savings = {a['id']: a for a in (portfolio_data or load_portfolio()).get('savings', [])}
+        changed = False
+        for entry in ledger:
+            if not entry.get('account_institution'):
+                acct = savings.get(entry.get('account_id'))
+                if acct and acct.get('institution'):
+                    entry['account_institution'] = acct['institution']
+                    changed = True
+        if changed:
+            try:
+                _atomic_write(LEDGER_FILE, ledger)
+            except Exception as e:
+                print(f"Error backfilling ledger: {e}")
+        return ledger
 
 
 def record_snapshot(totals_usd):
@@ -544,14 +596,16 @@ def generate_occurrences(item, horizon_date, from_date=None):
     freq = item.get('frequency')
     if freq not in MONTHLY_FACTOR:
         return []
-    start = _to_date(item.get('start_date'))
-    if start is None:
+    # Anchor on the next unposted occurrence so already-posted periods are never
+    # re-projected (which would double-count against updated balances).
+    anchor = _to_date(item.get('next_due_date')) or _to_date(item.get('start_date'))
+    if anchor is None:
         return []
     end = _to_date(item.get('end_date'))
     window_start = from_date or now_utc().date()
 
     occurrences = []
-    d = start
+    d = anchor
     guard = 0
     # Fast-forward to the first occurrence on/after the window start.
     while d < window_start and guard < 10000:
@@ -569,6 +623,90 @@ def generate_occurrences(item, horizon_date, from_date=None):
         d = nxt
         guard += 1
     return occurrences
+
+
+def due_occurrences(item, as_of):
+    """Occurrence dates that are due (on/before as_of) but not yet posted.
+
+    Starts from next_due_date and walks forward by frequency. Returns the list
+    of due dates plus the new next_due_date (the first not-yet-due date), so the
+    caller can advance the pointer and stay idempotent across runs.
+    """
+    current_next = item.get('next_due_date') or item.get('start_date')
+    if not item.get('is_active', True):
+        return [], current_next
+    freq = item.get('frequency')
+    if freq not in MONTHLY_FACTOR:
+        return [], current_next
+    d = _to_date(current_next)
+    if d is None:
+        return [], current_next
+    end = _to_date(item.get('end_date'))
+    due = []
+    guard = 0
+    while d <= as_of and (end is None or d <= end) and guard < 10000:
+        due.append(d)
+        nxt = _to_date(calculate_next_due_date(d.strftime("%Y-%m-%d"), freq))
+        if nxt is None or nxt <= d:
+            break
+        d = nxt
+        guard += 1
+    return due, d.strftime("%Y-%m-%d")
+
+
+def apply_due_transactions(portfolio_data):
+    """Post all due recurring occurrences to real account balances.
+
+    Catches up every missed period at once (not one/day), honors end_date and
+    pause, records a ledger entry per posting, and advances next_due_date so
+    re-running is idempotent. Returns the list of new ledger entries.
+    """
+    rates = get_fx_rates()
+    today = now_utc().date()
+    accounts = {a['id']: a for a in portfolio_data.get('savings', [])}
+    recurring = portfolio_data.get('recurring_transactions', {'income': [], 'expenses': []})
+    counter = len(load_ledger())
+    new_entries = []
+
+    def process(items, kind, sign, account_field):
+        nonlocal counter
+        for it in items:
+            due, new_next = due_occurrences(it, today)
+            if not due:
+                continue
+            acct = accounts.get(it.get(account_field))
+            if not acct:
+                # No valid target account: don't post and don't advance, so it
+                # can be corrected and applied later rather than silently lost.
+                continue
+            for d in due:
+                delta = sign * convert(it['amount'], it['currency'], acct['currency'], rates)
+                acct['balance'] += delta
+                acct['balance_usd'] = to_usd(acct['balance'], acct['currency'], rates)
+                acct['last_updated'] = now_iso()
+                counter += 1
+                new_entries.append({
+                    'id': f"ledger_{counter:04d}",
+                    'date': d.isoformat(),
+                    'type': kind,
+                    'name': it.get('name', ''),
+                    'amount': it['amount'],
+                    'currency': it['currency'],
+                    'account_id': acct['id'],
+                    'account_name': acct.get('name', ''),
+                    'account_institution': acct.get('institution', ''),
+                    'account_currency': acct['currency'],
+                    'delta_account': round(delta, 2),
+                    'resulting_balance': round(acct['balance'], 2),
+                    'applied_at': now_iso(),
+                })
+            it['last_processed'] = today.isoformat()
+            it['next_due_date'] = new_next
+
+    process(recurring.get('income', []), 'income', +1, 'target_account_id')
+    process(recurring.get('expenses', []), 'expense', -1, 'source_account_id')
+    append_ledger(new_entries)
+    return new_entries
 
 
 def build_recurring_summary(portfolio_data, rates, display_currency, horizon_months=12):
@@ -594,16 +732,30 @@ def build_recurring_summary(portfolio_data, rates, display_currency, horizon_mon
 
     # Horizon a little past the requested months so month-ends are covered.
     horizon = today + timedelta(days=int(31 * horizon_months) + 5)
+    # Forecast strictly the future (tomorrow onward). Anything due up to today is
+    # posted to balances by apply_due_transactions and already sits in current_nw,
+    # so counting it here too would double it.
+    forecast_start = today + timedelta(days=1)
 
-    events = []  # (date, signed_amount_display, name, type)
+    accounts = {a['id']: a for a in portfolio_data.get('savings', [])}
+
+    def acct_info(item, field):
+        a = accounts.get(item.get(field))
+        if not a:
+            return 'Unknown Account', ''
+        return a.get('name', ''), a.get('institution', '')
+
+    events = []  # (date, signed_amount_display, name, type, account_name, institution)
     for it in income:
         amt = convert(it['amount'], it['currency'], display_currency, rates)
-        for d in generate_occurrences(it, horizon):
-            events.append((d, amt, it['name'], 'income'))
+        aname, ainst = acct_info(it, 'target_account_id')
+        for d in generate_occurrences(it, horizon, from_date=forecast_start):
+            events.append((d, amt, it['name'], 'income', aname, ainst))
     for it in expenses:
         amt = convert(it['amount'], it['currency'], display_currency, rates)
-        for d in generate_occurrences(it, horizon):
-            events.append((d, -amt, it['name'], 'expense'))
+        aname, ainst = acct_info(it, 'source_account_id')
+        for d in generate_occurrences(it, horizon, from_date=forecast_start):
+            events.append((d, -amt, it['name'], 'expense', aname, ainst))
     events.sort(key=lambda e: e[0])
 
     current_nw = build_payload(portfolio_data, display_currency, rates)['totals']['grand_total']
@@ -615,11 +767,12 @@ def build_recurring_summary(portfolio_data, rates, display_currency, horizon_mon
         year = today.year + total_month_index // 12
         month = total_month_index % 12 + 1
         boundary = _month_end(year, month)
-        cum = sum(amt for (d, amt, _n, _t) in events if d <= boundary)
+        cum = sum(amt for (d, amt, *_rest) in events if d <= boundary)
         projection.append({'date': boundary.isoformat(), 'net_worth': round(current_nw + cum, 2)})
 
-    upcoming = [{'date': d.isoformat(), 'name': n, 'amount': round(amt, 2), 'type': t}
-                for (d, amt, n, t) in events if d >= today][:12]
+    upcoming = [{'date': d.isoformat(), 'name': n, 'amount': round(amt, 2), 'type': t,
+                 'account_name': an, 'account_institution': ai}
+                for (d, amt, n, t, an, ai) in events if d >= today][:12]
 
     return {
         'currency': display_currency,
@@ -1174,6 +1327,34 @@ def api_recurring_summary():
     return jsonify(build_recurring_summary(portfolio_data, rates, display_currency))
 
 
+@My_Networth_blueprint.route('/api/recurring/ledger', methods=['GET'])
+def api_recurring_ledger():
+    """Posting history (most recent first), with each amount shown in display currency."""
+    portfolio_data = load_portfolio()
+    display_currency = (request.args.get('currency') or portfolio_data.get('currency', 'USD')).upper()
+    rates = get_fx_rates()
+    ledger = backfill_ledger_institutions(portfolio_data)
+    out = []
+    for e in reversed(ledger[-200:]):
+        signed_native = e['amount'] * (1 if e['type'] == 'income' else -1)
+        out.append({**e, 'account_institution': e.get('account_institution', ''),
+                    'display_amount': round(convert(signed_native, e['currency'], display_currency, rates), 2)})
+    return jsonify({'currency': display_currency, 'ledger': out})
+
+
+@My_Networth_blueprint.route('/api/recurring/apply', methods=['POST'])
+def api_recurring_apply():
+    """Manually trigger posting of any due recurring transactions."""
+    denied = guard()
+    if denied:
+        return denied
+    portfolio_data = load_portfolio()
+    applied = apply_due_transactions(portfolio_data)
+    if applied:
+        save_portfolio(portfolio_data)
+    return jsonify({'ok': True, 'applied_count': len(applied), 'applied': applied})
+
+
 # ---------------------------------------------------------------------------
 # Legacy textarea form parsing (page POST)
 # ---------------------------------------------------------------------------
@@ -1315,8 +1496,14 @@ def calculate_net_worth():
             except Exception as e:
                 errors.append(f"An error occurred: {e}")
 
-    # Recurring income/expenses are forecast-only: they never mutate balances.
-    # See build_recurring_summary + /api/recurring/summary.
+    # Auto-post any due recurring transactions to real balances (idempotent;
+    # each posting is recorded in the ledger). Future occurrences remain a
+    # forecast via build_recurring_summary.
+    try:
+        if apply_due_transactions(portfolio_data):
+            save_portfolio(portfolio_data)
+    except Exception as e:
+        errors.append(f"Error applying recurring transactions: {e}")
 
     # Refresh prices at most once per TTL (guarded, user-initiated navigation).
     if needs_refresh(portfolio_data.get('last_updated')):

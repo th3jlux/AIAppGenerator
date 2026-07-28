@@ -666,6 +666,17 @@
             </div>
         </div>
 
+        <!-- Transaction ledger (auto-posted recurring activity) -->
+        <div class="category-section" style="margin-bottom: 30px;">
+            <div class="category-header">
+                <span><span class="category-icon">📒</span>Transaction Ledger</span>
+                <span class="total" style="background: rgba(255,255,255,0.1); color:#9ca3af; font-weight:400; font-size:0.8em;">auto-posted to balances</span>
+            </div>
+            <div class="category-content">
+                <div id="ledgerList" style="padding: 20px; color:#9ca3af; text-align:center;">Loading…</div>
+            </div>
+        </div>
+
         <!-- Add New Entries Section -->
         <div class="add-form-section">
             <h3 style="text-align: center; margin-bottom: 30px; color: #e1e5e9;">
@@ -1096,7 +1107,47 @@
             loadRecurringTransactions();
             loadAccounts();
             loadRecurringSummary();
+            loadLedger();
         });
+
+        function loadLedger() {
+            fetch('/api/recurring/ledger?currency=' + encodeURIComponent(NW_CURRENCY))
+                .then(r => r.json())
+                .then(data => {
+                    const el = document.getElementById('ledgerList');
+                    const rows = (data && data.ledger) || [];
+                    if (rows.length === 0) {
+                        el.innerHTML = 'No transactions posted yet. Recurring income and expenses post to their account automatically when they come due.';
+                        return;
+                    }
+                    const sym = NW_SYMBOL;
+                    const money = v => sym + Number(Math.abs(v)).toLocaleString(undefined, {maximumFractionDigits: 2});
+                    const body = rows.map(e => {
+                        const income = e.type === 'income';
+                        const color = income ? '#52a963' : '#e07a7a';
+                        const sign = income ? '+' : '−';
+                        return `<tr>
+                            <td style="padding:8px 12px;">${e.date}</td>
+                            <td style="padding:8px 12px;"><strong>${e.name}</strong></td>
+                            <td style="padding:8px 12px;"><strong>${e.account_name}</strong>${e.account_institution ? `<br><small style="color:#9ca3af;">${e.account_institution}</small>` : ''}</td>
+                            <td style="padding:8px 12px; text-align:right; color:${color};">${sign}${money(e.display_amount)}</td>
+                            <td style="padding:8px 12px; text-align:right;"><small>${e.account_currency} ${Number(e.resulting_balance).toLocaleString(undefined,{maximumFractionDigits:2})}</small></td>
+                        </tr>`;
+                    }).join('');
+                    el.innerHTML = `<table class="category-table">
+                        <thead><tr>
+                            <th style="padding:8px 12px;">Date</th>
+                            <th style="padding:8px 12px;">Transaction</th>
+                            <th style="padding:8px 12px;">Account</th>
+                            <th style="padding:8px 12px; text-align:right;">Amount</th>
+                            <th style="padding:8px 12px; text-align:right;">Balance after</th>
+                        </tr></thead>
+                        <tbody>${body}</tbody></table>`;
+                    el.style.padding = '0';
+                    el.style.textAlign = 'left';
+                })
+                .catch(err => console.error('Error loading ledger:', err));
+        }
 
         function loadRecurringSummary() {
             fetch('/api/recurring/summary?currency=' + encodeURIComponent(NW_CURRENCY))
@@ -1116,6 +1167,9 @@
                     if (!s.upcoming || s.upcoming.length === 0) {
                         list.innerHTML = 'No upcoming recurring transactions. Add income or expenses above to see a forecast.';
                     } else {
+                        const acctCell = (name, inst) => inst
+                            ? `<strong>${name}</strong><br><small style="color:#9ca3af;">${inst}</small>`
+                            : `<strong>${name}</strong>`;
                         const rows = s.upcoming.map(u => {
                             const income = u.type === 'income';
                             const color = income ? '#52a963' : '#e07a7a';
@@ -1123,10 +1177,18 @@
                             return `<tr>
                                 <td style="padding:8px 12px;">${u.date}</td>
                                 <td style="padding:8px 12px;"><strong>${u.name}</strong></td>
+                                <td style="padding:8px 12px;">${acctCell(u.account_name || 'Unknown', u.account_institution)}</td>
                                 <td style="padding:8px 12px; text-align:right; color:${color};">${sign}${money(Math.abs(u.amount))}</td>
                             </tr>`;
                         }).join('');
-                        list.innerHTML = `<table class="category-table"><tbody>${rows}</tbody></table>`;
+                        list.innerHTML = `<table class="category-table">
+                            <thead><tr>
+                                <th style="padding:8px 12px;">Date</th>
+                                <th style="padding:8px 12px;">Transaction</th>
+                                <th style="padding:8px 12px;">Account</th>
+                                <th style="padding:8px 12px; text-align:right;">Amount</th>
+                            </tr></thead>
+                            <tbody>${rows}</tbody></table>`;
                         list.style.padding = '0';
                         list.style.textAlign = 'left';
                     }
