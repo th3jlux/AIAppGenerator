@@ -291,6 +291,36 @@ def append_ledger(entries):
             print(f"Error saving ledger: {e}")
 
 
+def record_adjustment(account, delta_native):
+    """Log a manual cash-balance change as a ledger adjustment (reconciliation).
+
+    A drop is treated as untracked spending, a rise as untracked income, dated
+    today. These flow into cash-flow actuals so variable spending is captured
+    without itemising every transaction.
+    """
+    if not delta_native:
+        return
+    kind = 'income' if delta_native > 0 else 'expense'
+    ledger = load_ledger()
+    entry = {
+        'id': f"ledger_{len(ledger) + 1:04d}",
+        'date': now_utc().date().isoformat(),
+        'type': kind,
+        'source': 'adjustment',
+        'name': 'Untracked income' if kind == 'income' else 'Untracked spending',
+        'amount': round(abs(delta_native), 2),
+        'currency': account['currency'],
+        'account_id': account['id'],
+        'account_name': account.get('name', ''),
+        'account_institution': account.get('institution', ''),
+        'account_currency': account['currency'],
+        'delta_account': round(delta_native, 2),
+        'resulting_balance': round(account['balance'], 2),
+        'applied_at': now_iso(),
+    }
+    append_ledger([entry])
+
+
 def backfill_ledger_institutions(portfolio_data=None):
     """Fill account_institution on older ledger entries that predate the field.
 
@@ -1354,6 +1384,8 @@ def api_portfolio_update():
                 if usd is not None:
                     item['market_value'] = usd * item['amount']
         elif category == 'savings':
+            old_balance = item.get('balance')
+            old_currency = item.get('currency')
             if 'name' in body:
                 item['name'] = body['name'].strip()
             if 'currency' in body:
@@ -1365,6 +1397,14 @@ def api_portfolio_update():
                 item['institution'] = body['institution'].strip()
             if 'account_type' in body:
                 item['account_type'] = body['account_type'].strip()
+            # Reconciliation: a manual balance change on a cash account is logged
+            # as an adjustment (untracked spending/income). Skip if the currency
+            # was changed in the same edit (the numeric delta would be meaningless).
+            if ('balance' in body and old_balance is not None
+                    and item['currency'] == old_currency):
+                delta = item['balance'] - old_balance
+                if abs(delta) >= 0.005:
+                    record_adjustment(item, delta)
         elif category == 'loans':
             if 'name' in body:
                 item['name'] = body['name'].strip()

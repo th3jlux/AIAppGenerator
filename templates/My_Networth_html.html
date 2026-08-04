@@ -820,7 +820,7 @@
             <div class="category-header" style="flex-wrap:wrap; gap:10px;">
                 <span><span class="category-icon">📒</span>Transaction Ledger</span>
                 <input type="text" id="ledgerSearch" class="search-box" placeholder="Search by name, account, type…" oninput="renderLedger()" style="max-width:260px;">
-                <span class="total" style="background: rgba(255,255,255,0.1); color:#9ca3af; font-weight:400; font-size:0.8em;">auto-posted to balances</span>
+                <span class="total" style="background: rgba(255,255,255,0.1); color:#9ca3af; font-weight:400; font-size:0.8em;">recurring + balance adjustments</span>
             </div>
             <div class="category-content">
                 <div id="ledgerList" style="padding: 20px; color:#9ca3af; text-align:center;">Loading…</div>
@@ -1482,9 +1482,11 @@
             const acctCell = (n, i) => i ? `<strong>${n}</strong><br><small style="color:#9ca3af;">${i}</small>` : `<strong>${n}</strong>`;
             const body = rows.map(e => {
                 const income = e.type === 'income', color = income ? '#52a963' : '#e07a7a', sign = income ? '+' : '−';
+                const tag = e.source === 'adjustment'
+                    ? ' <span class="linking-indicator" style="background:#3a3550;color:#b3a9d9;border-color:#54497a;">adjustment</span>' : '';
                 return `<tr>
                     <td style="padding:8px 12px;">${e.date}</td>
-                    <td style="padding:8px 12px;"><strong>${e.name}</strong></td>
+                    <td style="padding:8px 12px;"><strong>${e.name}</strong>${tag}</td>
                     <td style="padding:8px 12px;">${acctCell(e.account_name || 'Unknown', e.account_institution)}</td>
                     <td style="padding:8px 12px; text-align:right; color:${color};">${sign}${money(Math.abs(e.display_amount))}</td>
                     <td style="padding:8px 12px; text-align:right;"><small>${e.account_currency} ${Number(e.resulting_balance).toLocaleString(undefined,{maximumFractionDigits:2})}</small></td>
