@@ -1341,17 +1341,36 @@
 
             if (window.__stacked) {
                 const labels = history.map(h => h.date);
-                const keys = [['stocks','Stocks','#6b8db5'],['cryptos','Crypto','#c2984f'],
-                              ['savings','Cash','#52a963'],['real_estate','Real Estate','#8b7fb8']];
+                // Net worth = assets − liabilities. Subtract loans so the bands
+                // sum to net worth (matches the line), reducing real-estate equity
+                // first (mortgage), then cascading to cash/crypto/stocks.
+                const netBands = h => {
+                    const b = h.breakdown || {};
+                    let stocks = b.stocks || 0, crypto = b.cryptos || 0,
+                        cash = b.savings || 0, re = b.real_estate || 0;
+                    let loan = Math.abs(b.loans || 0);
+                    const take = v => { const t = Math.min(v, loan); loan -= t; return v - t; };
+                    re = take(re); cash = take(cash); crypto = take(crypto); stocks = take(stocks);
+                    return { stocks, crypto, cash, re };
+                };
+                const nb = history.map(netBands);
+                const keys = [['stocks','Stocks','#6b8db5'],['crypto','Crypto','#c2984f'],
+                              ['cash','Cash','#52a963'],['re','Real Estate (equity)','#8b7fb8']];
                 const datasets = keys.map(([k, label, color]) => ({
-                    label, data: history.map(h => (h.breakdown || {})[k] || 0),
+                    label, data: nb.map(x => x[k]),
                     backgroundColor: color + 'cc', borderColor: color, fill: true, tension: 0.2, pointRadius: 0, stack: 's'
                 }));
                 window.__charts.trend = new Chart(ctx, {
                     type: 'line', data: { labels, datasets },
                     options: { responsive: true,
+                        interaction: { mode: 'index', intersect: false },
                         plugins: { legend: { labels: { color: '#cbd5e1' } }, zoom: zoomOpts,
-                            tooltip: { callbacks: { label: c => `${c.dataset.label}: ${money(c.parsed.y)}` } } },
+                            tooltip: {
+                                callbacks: {
+                                    label: c => `${c.dataset.label}: ${money(c.parsed.y)}`,
+                                    footer: items => 'Net worth: ' + money(items.reduce((s, i) => s + (i.parsed.y || 0), 0))
+                                }
+                            } },
                         scales: { x: { ticks: { color: '#9ca3af', maxTicksLimit: 10 }, grid: { color: 'rgba(255,255,255,0.05)' } },
                             y: { stacked: true, ticks: { color: '#9ca3af', callback: v => money(v) }, grid: { color: 'rgba(255,255,255,0.05)' } } } }
                 });
