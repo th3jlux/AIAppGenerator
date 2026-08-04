@@ -217,6 +217,7 @@ def default_portfolio():
         "real_estate": [],
         "investments": {"stocks": [], "cryptos": []},
         "recurring_transactions": {"income": [], "expenses": []},
+        "goal": None,
     }
 
 
@@ -758,7 +759,9 @@ def build_recurring_summary(portfolio_data, rates, display_currency, horizon_mon
             events.append((d, -amt, it['name'], 'expense', aname, ainst))
     events.sort(key=lambda e: e[0])
 
-    current_nw = build_payload(portfolio_data, display_currency, rates)['totals']['grand_total']
+    totals = build_payload(portfolio_data, display_currency, rates)['totals']
+    current_nw = totals['grand_total']
+    liquid_savings = totals['savings']
 
     # Month-end projection points.
     projection = [{'date': today.isoformat(), 'net_worth': round(current_nw, 2)}]
@@ -774,16 +777,185 @@ def build_recurring_summary(portfolio_data, rates, display_currency, horizon_mon
                  'account_name': an, 'account_institution': ai}
                 for (d, amt, n, t, an, ai) in events if d >= today][:12]
 
+    monthly_net = monthly_income - monthly_expenses
+    savings_rate = round(monthly_net / monthly_income * 100, 1) if monthly_income > 0 else None
+    runway_months = round(liquid_savings / monthly_expenses, 1) if monthly_expenses > 0 else None
+
+    goal = _goal_status(portfolio_data, current_nw, monthly_net, display_currency, rates, today)
+
     return {
         'currency': display_currency,
         'monthly_income': round(monthly_income, 2),
         'monthly_expenses': round(monthly_expenses, 2),
-        'monthly_net': round(monthly_income - monthly_expenses, 2),
-        'annual_net': round((monthly_income - monthly_expenses) * 12, 2),
+        'monthly_net': round(monthly_net, 2),
+        'annual_net': round(monthly_net * 12, 2),
         'current_net_worth': round(current_nw, 2),
+        'liquid_savings': round(liquid_savings, 2),
+        'savings_rate': savings_rate,
+        'runway_months': runway_months,
+        'goal': goal,
         'projection': projection,
         'upcoming': upcoming,
     }
+
+
+# ---------------------------------------------------------------------------
+# Allocation, cash-flow history and goals
+# ---------------------------------------------------------------------------
+
+CURRENCY_REGION = {'USD': 'United States', 'EUR': 'Eurozone', 'GBP': 'United Kingdom',
+                   'INR': 'India', 'TRY': 'Turkey'}
+CODE_COUNTRY = {'DE': 'Germany', 'IN': 'India', 'LU': 'Luxembourg', 'US': 'United States',
+                'GB': 'United Kingdom', 'UK': 'United Kingdom', 'TR': 'Turkey', 'FR': 'France',
+                'NL': 'Netherlands', 'ES': 'Spain', 'IT': 'Italy'}
+
+
+def build_allocation(portfolio_data, rates, display_currency):
+    """Asset allocation by class, currency and country/region (display currency)."""
+    p = build_payload(portfolio_data, display_currency, rates)
+
+    def bucketize(pairs):
+        agg = {}
+        for label, value in pairs:
+            if value <= 0:
+                continue
+            agg[label] = agg.get(label, 0.0) + value
+        return [{'label': k, 'value': round(v, 2)} for k, v in
+                sorted(agg.items(), key=lambda kv: -kv[1])]
+
+    # By asset class, with drill-down items.
+    by_class = []
+    def add_class(label, items, name_key, value_key):
+        arr = [{'name': it.get(name_key) or '—', 'value': round(it[value_key], 2)}
+               for it in items if it[value_key] > 0]
+        total = sum(x['value'] for x in arr)
+        if total > 0:
+            by_class.append({'label': label, 'value': round(total, 2),
+                             'items': sorted(arr, key=lambda x: -x['value'])})
+    add_class('Stocks', p['stocks'], 'symbol', 'market_value')
+    add_class('Crypto', p['cryptos'], 'symbol', 'market_value')
+    add_class('Cash', [{'name': s.get('institution') or s.get('name'), 'display_value': s['display_value']}
+                       for s in p['savings']], 'name', 'display_value')
+    add_class('Real Estate', p['real_estate'], 'name', 'display_value')
+    by_class.sort(key=lambda c: -c['value'])
+
+    # By currency (native currency of each holding).
+    ccy_pairs = []
+    for s in p['stocks']:
+        ccy_pairs.append(('USD', s['market_value']))
+    for c in p['cryptos']:
+        ccy_pairs.append(('USD', c['market_value']))
+    for a in p['savings']:
+        ccy_pairs.append((a['currency'], a['display_value']))
+    for r in p['real_estate']:
+        ccy_pairs.append((r['currency'], r['display_value']))
+    by_currency = bucketize(ccy_pairs)
+
+    # By country/region. Cash uses the account's country code (name) when it looks
+    # like one; everything else is grouped by currency region.
+    country_pairs = []
+    for a in portfolio_data.get('savings', []):
+        code = (a.get('name') or '').strip().upper()
+        country = CODE_COUNTRY.get(code) or CURRENCY_REGION.get(a['currency'], 'Other')
+        country_pairs.append((country, convert(a['balance'], a['currency'], display_currency, rates)))
+    for r in p['real_estate']:
+        country_pairs.append((CURRENCY_REGION.get(r['currency'], 'Other'), r['display_value']))
+    for s in p['stocks']:
+        country_pairs.append(('United States', s['market_value']))
+    for c in p['cryptos']:
+        country_pairs.append(('Global / Crypto', c['market_value']))
+    by_country = bucketize(country_pairs)
+
+    return {
+        'currency': display_currency,
+        'net_worth': p['totals']['grand_total'],
+        'total_assets': round(sum(c['value'] for c in by_class), 2),
+        'by_class': by_class,
+        'by_currency': by_currency,
+        'by_country': by_country,
+    }
+
+
+def build_cashflow(portfolio_data, rates, display_currency, months_back=6, months_fwd=6):
+    """Per-month income vs expenses: actuals from the ledger, future from forecast."""
+    today = now_utc().date()
+    income = portfolio_data.get('recurring_transactions', {}).get('income', [])
+    expenses = portfolio_data.get('recurring_transactions', {}).get('expenses', [])
+
+    def month_key(d):
+        return f"{d.year:04d}-{d.month:02d}"
+
+    # Ordered list of month keys from months_back ago .. months_fwd ahead.
+    keys = []
+    for offset in range(-months_back, months_fwd + 1):
+        idx = (today.year * 12 + today.month - 1) + offset
+        keys.append(f"{idx // 12:04d}-{idx % 12 + 1:02d}")
+    buckets = {k: {'month': k, 'income': 0.0, 'expenses': 0.0} for k in keys}
+    cur_key = month_key(today)
+
+    # Actuals from the ledger (past + current month).
+    for e in load_ledger():
+        d = _to_date(e['date'])
+        if not d:
+            continue
+        k = month_key(d)
+        if k not in buckets:
+            continue
+        amt = convert(e['amount'], e['currency'], display_currency, rates)
+        if e['type'] == 'income':
+            buckets[k]['income'] += amt
+        else:
+            buckets[k]['expenses'] += amt
+
+    # Projected future occurrences (strictly after today).
+    horizon = today + timedelta(days=int(31 * months_fwd) + 5)
+    fstart = today + timedelta(days=1)
+    for it in income:
+        amt = convert(it['amount'], it['currency'], display_currency, rates)
+        for d in generate_occurrences(it, horizon, from_date=fstart):
+            k = month_key(d)
+            if k in buckets:
+                buckets[k]['income'] += amt
+    for it in expenses:
+        amt = convert(it['amount'], it['currency'], display_currency, rates)
+        for d in generate_occurrences(it, horizon, from_date=fstart):
+            k = month_key(d)
+            if k in buckets:
+                buckets[k]['expenses'] += amt
+
+    out = []
+    for k in keys:
+        b = buckets[k]
+        out.append({'month': k, 'income': round(b['income'], 2), 'expenses': round(b['expenses'], 2),
+                    'net': round(b['income'] - b['expenses'], 2),
+                    'kind': 'actual' if k <= cur_key else 'projected'})
+    return {'currency': display_currency, 'months': out}
+
+
+def _goal_status(portfolio_data, current_nw, monthly_net, display_currency, rates, today):
+    """Net-worth goal progress + projected completion date, or None if unset."""
+    goal = portfolio_data.get('goal')
+    if not goal or not goal.get('target'):
+        return None
+    target_display = convert(goal['target'], goal.get('currency', 'USD'), display_currency, rates)
+    if target_display <= 0:
+        return None
+    progress = max(0.0, min(1.0, current_nw / target_display))
+    result = {
+        'target': round(target_display, 2),
+        'target_currency': display_currency,
+        'progress': round(progress * 100, 1),
+        'reached': current_nw >= target_display,
+        'projected_date': None,
+        'months_to_go': None,
+    }
+    if current_nw < target_display and monthly_net > 0:
+        import math
+        months = math.ceil((target_display - current_nw) / monthly_net)
+        idx = (today.year * 12 + today.month - 1) + months
+        result['months_to_go'] = months
+        result['projected_date'] = f"{idx // 12:04d}-{idx % 12 + 1:02d}"
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -899,11 +1071,75 @@ def api_portfolio_history():
     display_currency = (request.args.get('currency') or 'USD').upper()
     rates = get_fx_rates()
     history = load_history()
-    series = [{
-        'date': h['date'],
-        'grand_total': round(convert(h.get('grand_total', 0), 'USD', display_currency, rates), 2),
-    } for h in history]
+
+    def conv(v):
+        return round(convert(v, 'USD', display_currency, rates), 2)
+
+    series = []
+    for h in history:
+        bd = h.get('breakdown', {}) or {}
+        series.append({
+            'date': h['date'],
+            'grand_total': conv(h.get('grand_total', 0)),
+            'breakdown': {
+                'stocks': conv(bd.get('stocks', 0)),
+                'cryptos': conv(bd.get('cryptos', 0)),
+                'savings': conv(bd.get('savings', 0)),
+                'real_estate': conv(bd.get('real_estate', 0)),
+                'loans': conv(bd.get('loans', 0)),
+            },
+        })
     return jsonify({'currency': display_currency, 'history': series})
+
+
+@My_Networth_blueprint.route('/api/portfolio/allocation', methods=['GET'])
+def api_portfolio_allocation():
+    """Asset allocation by class (with drill-down), currency and country."""
+    portfolio_data = load_portfolio()
+    display_currency = (request.args.get('currency') or portfolio_data.get('currency', 'USD')).upper()
+    return jsonify(build_allocation(portfolio_data, get_fx_rates(), display_currency))
+
+
+@My_Networth_blueprint.route('/api/portfolio/cashflow', methods=['GET'])
+def api_portfolio_cashflow():
+    """Per-month income vs expenses (actual from ledger + projected)."""
+    portfolio_data = load_portfolio()
+    display_currency = (request.args.get('currency') or portfolio_data.get('currency', 'USD')).upper()
+    try:
+        back = max(0, min(24, int(request.args.get('back', 6))))
+        fwd = max(0, min(24, int(request.args.get('fwd', 6))))
+    except (TypeError, ValueError):
+        back, fwd = 6, 6
+    return jsonify(build_cashflow(portfolio_data, get_fx_rates(), display_currency, back, fwd))
+
+
+@My_Networth_blueprint.route('/api/goal', methods=['GET', 'POST'])
+def api_goal():
+    """Get or set the net-worth goal. POST {target, currency} or {target: null} to clear."""
+    portfolio_data = load_portfolio()
+    if request.method == 'GET':
+        return jsonify({'goal': portfolio_data.get('goal')})
+    denied = guard()
+    if denied:
+        return denied
+    try:
+        body = request.get_json(force=True)
+    except Exception as e:
+        return jsonify({'error': f'Invalid request: {e}'}), 400
+    target = body.get('target')
+    if target in (None, '', 0, '0'):
+        portfolio_data['goal'] = None
+    else:
+        try:
+            target = float(target)
+        except (TypeError, ValueError):
+            return jsonify({'error': "'target' must be a number"}), 400
+        if target <= 0:
+            return jsonify({'error': "'target' must be greater than 0"}), 400
+        currency = (body.get('currency') or portfolio_data.get('currency', 'USD')).strip().upper()
+        portfolio_data['goal'] = {'target': target, 'currency': currency}
+    save_portfolio(portfolio_data)
+    return jsonify({'ok': True, 'goal': portfolio_data['goal']})
 
 
 @My_Networth_blueprint.route('/api/portfolio/refresh', methods=['POST'])

@@ -174,3 +174,6 @@ data/progress.json
 git_skip_helper.py
 data/networth.json
 data/networth_history.json
+data/networth_ledger.json
+data/networth_history.json
+data/networth.json

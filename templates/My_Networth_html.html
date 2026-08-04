@@ -279,6 +279,60 @@
             padding: 6px 12px;
             font-size: 0.8em;
         }
+
+        /* Sticky header + tabs */
+        .sticky-bar {
+            position: sticky; top: 0; z-index: 500;
+            background: rgba(29,29,29,0.92); backdrop-filter: blur(6px);
+            border-bottom: 1px solid #3a3a3a;
+            display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+            padding: 10px 4px; margin: -8px 0 12px;
+        }
+        .sticky-bar .nw { font-size: 1.4em; font-weight: 500; }
+        .sticky-bar .nw small { color: #9ca3af; font-size: 0.6em; display:block; }
+        .tabbar { display: flex; gap: 6px; flex-wrap: wrap; }
+        .tab-btn {
+            background: #3a3a3a; color: #cbd5e1; border: 1px solid #4a4a4a;
+            padding: 8px 16px; border-radius: 999px; cursor: pointer; font-size: 0.9em;
+            transition: all 0.15s;
+        }
+        .tab-btn:hover { background: #454545; }
+        .tab-btn.active { background: #4a90e2; color: #fff; border-color: #4a90e2; }
+        .tab-panel { display: none; }
+        .tab-panel.active { display: block; }
+        .cards-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 24px; }
+        /* Grid panels must stay grids (not block) when their tab is active */
+        .primary-assets.tab-panel.active,
+        .investments.tab-panel.active,
+        .cash-and-debt.tab-panel.active,
+        .category-grid.tab-panel.active,
+        .cards-grid.tab-panel.active { display: grid; }
+        .analytics-grid {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 24px; margin-bottom: 30px;
+        }
+        .chart-controls { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+        .chip {
+            background: #3a3a3a; color: #cbd5e1; border: 1px solid #4a4a4a;
+            padding: 4px 12px; border-radius: 999px; cursor: pointer; font-size: 0.8em;
+        }
+        .chip.active { background: #4a90e2; color: #fff; border-color: #4a90e2; }
+        /* Collapsible sections */
+        .category-header.collapsible { cursor: pointer; user-select: none; }
+        .category-header.collapsible::after { content: '▾'; margin-left: 8px; color: #9ca3af; transition: transform 0.2s; }
+        .category-section.collapsed .category-header.collapsible::after { transform: rotate(-90deg); }
+        .category-section.collapsed .category-content { display: none; }
+        /* Sortable table headers */
+        th.sortable { cursor: pointer; }
+        th.sortable:hover { color: #fff; }
+        th.sortable .arrow { color: #4a90e2; font-size: 0.8em; }
+        .drill-row td { background: #333; }
+        .search-box {
+            background: #3a3a3a; border: 1px solid #4a4a4a; color: #e1e5e9;
+            padding: 8px 12px; border-radius: 6px; width: 100%; max-width: 320px;
+        }
+        .progress-track { background: #3a3a3a; border-radius: 999px; height: 14px; overflow: hidden; border: 1px solid #4a4a4a; }
+        .progress-fill { background: linear-gradient(90deg, #4a90e2, #52a963); height: 100%; transition: width 0.4s; }
     </style>
 </head>
 <body>
@@ -291,56 +345,69 @@
             {% endfor %}
         {% endif %}
 
+        <!-- Sticky header with live net worth, currency + tabs -->
+        <div class="sticky-bar">
+            <div class="nw">
+                <span id="stickyNetWorth">{{ get_currency_symbol(currency) }}{{ format_currency_value(totals.grand_total, currency) }}</span>
+                <small>Net Worth</small>
+            </div>
+            <div class="tabbar" id="tabbar">
+                <button class="tab-btn active" data-target="overview" onclick="showTab('overview')">📊 Overview</button>
+                <button class="tab-btn" data-target="holdings" onclick="showTab('holdings')">💼 Holdings</button>
+                <button class="tab-btn" data-target="recurring" onclick="showTab('recurring')">🔄 Recurring</button>
+                <button class="tab-btn" data-target="activity" onclick="showTab('activity')">📒 Activity</button>
+            </div>
+            <div style="margin-left:auto; display:flex; align-items:center; gap:8px;">
+                <select id="currencySelect" onchange="changeCurrency()" style="padding: 8px 12px; border-radius: 6px; border: 1px solid #4a4a4a; background-color: #3a3a3a; color: #e1e5e9;">
+                    {% for ccy in (supported_currencies or ['USD','EUR','INR','TRY','GBP']) %}
+                    <option value="{{ ccy }}" {{ 'selected' if currency == ccy else '' }}>{{ ccy }}</option>
+                    {% endfor %}
+                </select>
+                <button id="refreshButton" class="btn btn-small">↻ Refresh</button>
+            </div>
+        </div>
+
         <!-- Primary Assets Section -->
-        <div class="primary-assets">
+        <div class="primary-assets tab-panel active" data-tab="overview">
             <!-- Net Worth Summary -->
             <div class="category-section" style="background: linear-gradient(135deg, #6c7b8a 0%, #8a9ba8 100%); color: white;">
                 <div class="category-header" style="background: rgba(255,255,255,0.1); color: white; border-bottom: 1px solid rgba(255,255,255,0.2);">
                     <span><span class="category-icon">💎</span>Net Worth</span>
                 </div>
                 <div style="padding: 25px; text-align: center;">
-                    <div style="font-size: 2.8em; font-weight: 300; margin-bottom: 15px;">
+                    <div id="nwGrand" style="font-size: 2.8em; font-weight: 300; margin-bottom: 15px;">
                         {{ get_currency_symbol(currency) }}{{ format_currency_value(totals.grand_total, currency) }}
                     </div>
                     <div style="display: grid; gap: 12px; font-size: 0.95em; opacity: 0.9;">
                         <div style="display: flex; justify-content: space-between;">
                             <span>💼 Investments:</span>
-                            <span>{{ get_currency_symbol(currency) }}{{ format_currency_value(totals.stocks + totals.cryptos, currency) }}</span>
+                            <span id="nwInvest">{{ get_currency_symbol(currency) }}{{ format_currency_value(totals.stocks + totals.cryptos, currency) }}</span>
                         </div>
                         <div style="display: flex; justify-content: space-between;">
                             <span>🏠 Real Estate:</span>
-                            <span>{{ get_currency_symbol(currency) }}{{ format_currency_value(totals.real_estate, currency) }}</span>
+                            <span id="nwRealEstate">{{ get_currency_symbol(currency) }}{{ format_currency_value(totals.real_estate, currency) }}</span>
                         </div>
                         <div style="display: flex; justify-content: space-between;">
                             <span>💳 Savings:</span>
-                            <span>{{ get_currency_symbol(currency) }}{{ format_currency_value(totals.savings, currency) }}</span>
+                            <span id="nwSavings">{{ get_currency_symbol(currency) }}{{ format_currency_value(totals.savings, currency) }}</span>
                         </div>
                         <div style="display: flex; justify-content: space-between;">
                             <span>📉 Loans:</span>
-                            <span>{{ get_currency_symbol(currency) }}{{ format_currency_value(totals.loans, currency) }}</span>
+                            <span id="nwLoans">{{ get_currency_symbol(currency) }}{{ format_currency_value(totals.loans, currency) }}</span>
                         </div>
                     </div>
                 </div>
 
 
-                <!-- Currency Selection -->
-                <div class="currency-selector">
-                    <label for="currencySelect">Display Currency: </label>
-                    <select id="currencySelect" onchange="changeCurrency()">
-                        {% for ccy in (supported_currencies or ['USD','EUR','INR','TRY','GBP']) %}
-                        <option value="{{ ccy }}" {{ 'selected' if currency == ccy else '' }}>{{ ccy }}</option>
-                        {% endfor %}
-                    </select>
-                    <button id="refreshButton" class="btn" style="margin-left: 15px;">Refresh Prices</button>
-                </div>
+                <div style="text-align:center; padding-bottom: 15px; color:#cbd5e1; font-size:0.85em;" id="nwChangeInline"></div>
             </div>
             <!-- Real Estate Section -->
             <div class="category-section">
                 <div class="category-header">
                     <span><span class="category-icon">🏠</span>Real Estate</span>
-                    <span class="total">{{ get_currency_symbol(currency) }}{{ format_currency_value(totals.real_estate, currency) }}</span>
+                    <span class="total" id="realEstateTotal">{{ get_currency_symbol(currency) }}{{ format_currency_value(totals.real_estate, currency) }}</span>
                 </div>
-                <div class="category-content">
+                <div class="category-content" id="realEstateContent">
                     {% if real_estate %}
                         <table class="category-table">
                             <thead>
@@ -392,29 +459,69 @@
         </div>
 
         <!-- Net Worth Trend -->
-        <div class="category-section" style="margin-bottom: 30px;">
-            <div class="category-header">
+        <div class="category-section tab-panel active" data-tab="overview" style="margin-bottom: 30px;">
+            <div class="category-header" style="flex-wrap:wrap; gap:10px;">
                 <span><span class="category-icon">📊</span>Net Worth Over Time</span>
-                <span class="total" id="trendChange" style="background: rgba(255,255,255,0.1); color: #9ca3af;">—</span>
+                <div class="chart-controls">
+                    <span id="trendRange" class="chart-controls">
+                        <span class="chip" data-range="1M">1M</span>
+                        <span class="chip" data-range="3M">3M</span>
+                        <span class="chip" data-range="6M">6M</span>
+                        <span class="chip" data-range="1Y">1Y</span>
+                        <span class="chip active" data-range="ALL">All</span>
+                    </span>
+                    <span class="chip" id="stackedToggle" title="Show what makes up your net worth over time">Composition</span>
+                    <span class="chip" id="zoomReset" title="Reset zoom">⤢ Reset</span>
+                    <span class="total" id="trendChange" style="background: rgba(255,255,255,0.1); color: #9ca3af;">—</span>
+                </div>
             </div>
             <div class="category-content" style="padding: 20px;">
                 <div id="trendEmpty" style="display:none; text-align:center; color:#9ca3af; padding:20px;">
                     Not enough history yet — snapshots are recorded each day you open this page.
                 </div>
                 <canvas id="netWorthChart" height="90"></canvas>
+                <div id="trendPointDetail" style="display:none; margin-top:12px; padding:12px; background:#333; border-radius:8px; font-size:0.9em;"></div>
+                <div style="text-align:center; color:#6b7280; font-size:0.75em; margin-top:8px;">Tip: scroll to zoom, drag to pan, click a point for that day's breakdown.</div>
+            </div>
+        </div>
+
+        <!-- Allocation analytics -->
+        <div class="tab-panel active" data-tab="overview">
+            <div class="analytics-grid">
+                <div class="category-section">
+                    <div class="category-header"><span><span class="category-icon">🥧</span>By Asset Class</span></div>
+                    <div class="category-content" style="padding:16px;">
+                        <canvas id="allocClassChart" height="180"></canvas>
+                        <div id="allocClassDrill" style="margin-top:10px; font-size:0.85em;"></div>
+                    </div>
+                </div>
+                <div class="category-section">
+                    <div class="category-header"><span><span class="category-icon">💱</span>By Currency</span></div>
+                    <div class="category-content" style="padding:16px;">
+                        <canvas id="allocCurrencyChart" height="180"></canvas>
+                        <div id="allocCurrencyDrill" style="margin-top:10px; font-size:0.85em;"></div>
+                    </div>
+                </div>
+                <div class="category-section">
+                    <div class="category-header"><span><span class="category-icon">🌍</span>By Country</span></div>
+                    <div class="category-content" style="padding:16px;">
+                        <canvas id="allocCountryChart" height="180"></canvas>
+                        <div id="allocCountryDrill" style="margin-top:10px; font-size:0.85em;"></div>
+                    </div>
+                </div>
             </div>
         </div>
 
         <!-- Investments Section -->
-        <div class="investments">
+        <div class="investments tab-panel" data-tab="holdings">
 
             <!-- Stocks Section -->
             <div class="category-section">
                 <div class="category-header">
                     <span><span class="category-icon">📈</span>Stocks</span>
-                    <span class="total" style="color: #6b8db5;">{{ get_currency_symbol(currency) }}{{ format_currency_value(totals.stocks, currency) }}</span>
+                    <span class="total" id="stocksTotal" style="color: #6b8db5;">{{ get_currency_symbol(currency) }}{{ format_currency_value(totals.stocks, currency) }}</span>
                 </div>
-                <div class="category-content">
+                <div class="category-content" id="stocksContent">
                     {% if stocks %}
                         <table class="category-table">
                             <thead>
@@ -456,9 +563,9 @@
             <div class="category-section">
                 <div class="category-header">
                     <span><span class="category-icon">₿</span>Cryptocurrencies</span>
-                    <span class="total" style="color: #c2984f;">{{ get_currency_symbol(currency) }}{{ format_currency_value(totals.cryptos, currency) }}</span>
+                    <span class="total" id="cryptosTotal" style="color: #c2984f;">{{ get_currency_symbol(currency) }}{{ format_currency_value(totals.cryptos, currency) }}</span>
                 </div>
-                <div class="category-content">
+                <div class="category-content" id="cryptosContent">
                     {% if cryptos %}
                         <table class="category-table">
                             <thead>
@@ -500,14 +607,14 @@
 
 
         <!-- Cash and Debt Section -->
-        <div class="cash-and-debt">
+        <div class="cash-and-debt tab-panel" data-tab="holdings">
             <!-- Savings Section -->
             <div class="category-section">
                 <div class="category-header">
                     <span><span class="category-icon">💳</span>Savings & Cash</span>
-                    <span class="total" style="color: #52a963;">{{ get_currency_symbol(currency) }}{{ format_currency_value(totals.savings, currency) }}</span>
+                    <span class="total" id="savingsTotal" style="color: #52a963;">{{ get_currency_symbol(currency) }}{{ format_currency_value(totals.savings, currency) }}</span>
                 </div>
-                <div class="category-content">
+                <div class="category-content" id="savingsContent">
                     {% if savings %}
                         <table class="category-table">
                             <thead>
@@ -549,9 +656,9 @@
             <div class="category-section">
                 <div class="category-header">
                     <span><span class="category-icon">📉</span>Loans & Debts</span>
-                    <span class="total" style="color: #e07a7a;">{{ get_currency_symbol(currency) }}{{ format_currency_value(totals.loans, currency) }}</span>
+                    <span class="total" id="loansTotal" style="color: #e07a7a;">{{ get_currency_symbol(currency) }}{{ format_currency_value(totals.loans, currency) }}</span>
                 </div>
-                <div class="category-content">
+                <div class="category-content" id="loansContent">
                     {% if loans %}
                         <table class="category-table">
                             <thead>
@@ -596,10 +703,10 @@
         </div>
 
         <!-- Recurring cash-flow summary -->
-        <h3 style="text-align:center; margin: 10px 0 18px; color:#e1e5e9; font-weight:500;">
+        <h3 class="tab-panel" data-tab="recurring" style="text-align:center; margin: 10px 0 18px; color:#e1e5e9; font-weight:500;">
             🔄 Recurring &amp; Forecast
         </h3>
-        <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap:16px; margin-bottom:24px;">
+        <div class="cards-grid tab-panel" data-tab="recurring">
             <div class="summary-card">
                 <div style="color:#9ca3af; font-size:0.85em; margin-bottom:6px;">Monthly Income</div>
                 <div id="cfIncome" class="stat-positive" style="font-size:1.5em; font-weight:400;">—</div>
@@ -613,10 +720,52 @@
                 <div id="cfNet" style="font-size:1.5em; font-weight:400;">—</div>
                 <div id="cfAnnual" style="color:#9ca3af; font-size:0.8em; margin-top:4px;"></div>
             </div>
+            <div class="summary-card">
+                <div style="color:#9ca3af; font-size:0.85em; margin-bottom:6px;">Savings Rate</div>
+                <div id="cfRate" class="stat-neutral" style="font-size:1.5em; font-weight:400;">—</div>
+                <div style="color:#9ca3af; font-size:0.8em; margin-top:4px;">of income saved</div>
+            </div>
+            <div class="summary-card">
+                <div style="color:#9ca3af; font-size:0.85em; margin-bottom:6px;">Runway</div>
+                <div id="cfRunway" class="stat-neutral" style="font-size:1.5em; font-weight:400;">—</div>
+                <div style="color:#9ca3af; font-size:0.8em; margin-top:4px;">savings ÷ expenses</div>
+            </div>
+        </div>
+
+        <!-- Cash-flow chart + goal -->
+        <div class="tab-panel" data-tab="recurring">
+            <div class="analytics-grid">
+                <div class="category-section">
+                    <div class="category-header"><span><span class="category-icon">📊</span>Monthly Cash Flow</span>
+                        <span class="total" style="background:rgba(255,255,255,0.1); color:#9ca3af; font-size:0.8em;">actual → projected</span>
+                    </div>
+                    <div class="category-content" style="padding:16px;"><canvas id="cashflowChart" height="150"></canvas></div>
+                </div>
+                <div class="category-section">
+                    <div class="category-header"><span><span class="category-icon">🎯</span>Net Worth Goal</span></div>
+                    <div class="category-content" style="padding:16px;">
+                        <div id="goalDisplay" style="display:none;">
+                            <div style="display:flex; justify-content:space-between; margin-bottom:6px; font-size:0.9em;">
+                                <span id="goalCurrent"></span><span id="goalTarget" style="color:#9ca3af;"></span>
+                            </div>
+                            <div class="progress-track"><div class="progress-fill" id="goalFill" style="width:0%;"></div></div>
+                            <div id="goalMeta" style="margin-top:10px; color:#cbd5e1; font-size:0.9em;"></div>
+                            <button class="btn btn-small" style="margin-top:10px; background:#6c757d;" onclick="editGoal()">Edit goal</button>
+                        </div>
+                        <div id="goalSetter">
+                            <div style="color:#9ca3af; font-size:0.9em; margin-bottom:8px;">Set a net-worth target to track progress and see your projected finish date.</div>
+                            <div style="display:flex; gap:8px;">
+                                <input type="number" id="goalInput" class="search-box" placeholder="e.g. 2000000" style="max-width:200px;">
+                                <button class="btn btn-small success" onclick="saveGoal()">Set goal</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- Recurring Transactions Section -->
-        <div class="category-grid">
+        <div class="category-grid tab-panel" data-tab="recurring">
             <!-- Recurring Income Section -->
             <div class="category-section">
                 <div class="category-header">
@@ -657,7 +806,7 @@
         </div>
 
         <!-- Upcoming schedule -->
-        <div class="category-section" style="margin-bottom: 30px;">
+        <div class="category-section tab-panel" data-tab="recurring" style="margin-bottom: 30px;">
             <div class="category-header">
                 <span><span class="category-icon">🗓️</span>Upcoming (next occurrences)</span>
             </div>
@@ -667,9 +816,10 @@
         </div>
 
         <!-- Transaction ledger (auto-posted recurring activity) -->
-        <div class="category-section" style="margin-bottom: 30px;">
-            <div class="category-header">
+        <div class="category-section tab-panel" data-tab="activity" style="margin-bottom: 30px;">
+            <div class="category-header" style="flex-wrap:wrap; gap:10px;">
                 <span><span class="category-icon">📒</span>Transaction Ledger</span>
+                <input type="text" id="ledgerSearch" class="search-box" placeholder="Search by name, account, type…" oninput="renderLedger()" style="max-width:260px;">
                 <span class="total" style="background: rgba(255,255,255,0.1); color:#9ca3af; font-weight:400; font-size:0.8em;">auto-posted to balances</span>
             </div>
             <div class="category-content">
@@ -678,7 +828,7 @@
         </div>
 
         <!-- Add New Entries Section -->
-        <div class="add-form-section">
+        <div class="add-form-section tab-panel" data-tab="holdings">
             <h3 style="text-align: center; margin-bottom: 30px; color: #e1e5e9;">
                 <span style="font-size: 1.3em;">➕</span> Add New Entries
             </h3>
@@ -728,7 +878,7 @@
         </div>
 
         {% if last_updated %}
-            <div class="last-updated">
+            <div class="last-updated tab-panel" data-tab="holdings">
                 Last updated: {{ last_updated }}
             </div>
         {% endif %}
@@ -893,6 +1043,8 @@
 
     <!-- Net worth trend chart -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/hammerjs/2.0.8/hammer.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chartjs-plugin-zoom/2.0.1/chartjs-plugin-zoom.min.js"></script>
     <script>
         const NW_CURRENCY = {{ currency|tojson }};
         const NW_SYMBOL = {{ get_currency_symbol(currency)|tojson }};
@@ -998,6 +1150,469 @@
                 })
                 .catch(err => console.error('Error loading history:', err));
         });
+    </script>
+
+    <!-- Interactive dashboard: tabs, allocation, cashflow, goals, zoom, sorting -->
+    <script>
+    (function () {
+        const SYMBOLS = {USD:'$', EUR:'€', INR:'₹', TRY:'₺', GBP:'£'};
+        window.DISP = {ccy: NW_CURRENCY, sym: NW_SYMBOL};
+        window.__charts = window.__charts || {};
+        const PALETTE = ['#4a90e2','#52a963','#c2984f','#8b7fb8','#e07a7a','#6b8db5','#5bc0be','#e0a458','#9b6b9e','#77aace'];
+
+        window.money = function (v, dp) {
+            const n = Number(v) || 0;
+            return (n < 0 ? '-' : '') + window.DISP.sym +
+                Math.abs(n).toLocaleString(undefined, {maximumFractionDigits: dp == null ? 0 : dp});
+        };
+        const money = window.money;
+        function pct(part, whole) { return whole ? (part / whole * 100) : 0; }
+
+        // ---------- Tabs ----------
+        window.showTab = function (tab) {
+            document.querySelectorAll('.tab-panel').forEach(p => {
+                p.classList.toggle('active', p.getAttribute('data-tab') === tab);
+            });
+            document.querySelectorAll('.tab-btn').forEach(b => {
+                b.classList.toggle('active', b.getAttribute('data-target') === tab);
+            });
+            try { localStorage.setItem('nw_tab', tab); } catch (e) {}
+            // Charts need a resize nudge when their panel becomes visible.
+            setTimeout(() => Object.values(window.__charts).forEach(c => { try { c.resize(); } catch (e) {} }), 30);
+        };
+
+        // ---------- Collapsible sections ----------
+        function initCollapsible() {
+            document.querySelectorAll('.category-section .category-header').forEach(h => {
+                if (h.dataset.collapsibleInit) return;
+                h.dataset.collapsibleInit = '1';
+                h.classList.add('collapsible');
+                h.addEventListener('click', (e) => {
+                    if (e.target.closest('button, input, select, a, .chip')) return;
+                    h.closest('.category-section').classList.toggle('collapsed');
+                });
+            });
+        }
+
+        // ---------- Allocation donuts ----------
+        function donut(canvasId, drillId, rows, withItems) {
+            const el = document.getElementById(canvasId);
+            if (!el) return;
+            const labels = rows.map(r => r.label);
+            const values = rows.map(r => r.value);
+            const total = values.reduce((a, b) => a + b, 0);
+            if (window.__charts[canvasId]) window.__charts[canvasId].destroy();
+            const drill = document.getElementById(drillId);
+            if (drill) drill.innerHTML = '';
+            window.__charts[canvasId] = new Chart(el.getContext('2d'), {
+                type: 'doughnut',
+                data: { labels, datasets: [{ data: values, backgroundColor: PALETTE, borderColor: '#2d2d2d', borderWidth: 2 }] },
+                options: {
+                    responsive: true, cutout: '58%',
+                    plugins: {
+                        legend: { position: 'bottom', labels: { color: '#cbd5e1', boxWidth: 12, font: { size: 11 } } },
+                        tooltip: { callbacks: { label: c => `${c.label}: ${money(c.parsed)} (${pct(c.parsed, total).toFixed(1)}%)` } }
+                    },
+                    onClick: (evt, els) => {
+                        if (!els.length || !drill) return;
+                        const row = rows[els[0].index];
+                        let html = `<div style="margin-bottom:6px;"><strong>${row.label}</strong> — ${money(row.value)} (${pct(row.value, total).toFixed(1)}%)</div>`;
+                        if (withItems && row.items && row.items.length) {
+                            html += '<table class="category-table"><tbody>' + row.items.map(it =>
+                                `<tr><td style="padding:6px 10px;">${it.name}</td><td style="padding:6px 10px; text-align:right;">${money(it.value)}</td></tr>`).join('') + '</tbody></table>';
+                        }
+                        drill.innerHTML = html;
+                    }
+                }
+            });
+        }
+
+        window.loadAllocation = function (ccy) {
+            ccy = ccy || window.DISP.ccy;
+            fetch('/api/portfolio/allocation?currency=' + encodeURIComponent(ccy))
+                .then(r => r.json())
+                .then(a => {
+                    donut('allocClassChart', 'allocClassDrill', a.by_class || [], true);
+                    donut('allocCurrencyChart', 'allocCurrencyDrill', a.by_currency || [], false);
+                    donut('allocCountryChart', 'allocCountryDrill', a.by_country || [], false);
+                })
+                .catch(e => console.error('allocation', e));
+        };
+
+        // ---------- Cash-flow bar chart ----------
+        window.loadCashflow = function (ccy) {
+            ccy = ccy || window.DISP.ccy;
+            fetch('/api/portfolio/cashflow?currency=' + encodeURIComponent(ccy) + '&back=6&fwd=6')
+                .then(r => r.json())
+                .then(cf => {
+                    const el = document.getElementById('cashflowChart');
+                    if (!el) return;
+                    const months = cf.months || [];
+                    const labels = months.map(m => m.month);
+                    const inc = months.map(m => m.income);
+                    const exp = months.map(m => m.expenses);
+                    const incColors = months.map(m => m.kind === 'projected' ? 'rgba(82,169,99,0.45)' : '#52a963');
+                    const expColors = months.map(m => m.kind === 'projected' ? 'rgba(224,122,122,0.45)' : '#e07a7a');
+                    if (window.__charts.cashflow) window.__charts.cashflow.destroy();
+                    window.__charts.cashflow = new Chart(el.getContext('2d'), {
+                        type: 'bar',
+                        data: { labels, datasets: [
+                            { label: 'Income', data: inc, backgroundColor: incColors },
+                            { label: 'Expenses', data: exp, backgroundColor: expColors },
+                        ]},
+                        options: {
+                            responsive: true,
+                            plugins: {
+                                legend: { labels: { color: '#cbd5e1' } },
+                                tooltip: { callbacks: { label: c => `${c.dataset.label}: ${money(c.parsed.y)}` } }
+                            },
+                            scales: {
+                                x: { ticks: { color: '#9ca3af' }, grid: { color: 'rgba(255,255,255,0.05)' } },
+                                y: { ticks: { color: '#9ca3af', callback: v => money(v) }, grid: { color: 'rgba(255,255,255,0.05)' } }
+                            }
+                        }
+                    });
+                })
+                .catch(e => console.error('cashflow', e));
+        };
+
+        // ---------- Goal ----------
+        window.__goal = null;
+        window.renderGoal = function (goal, currentNW) {
+            window.__goal = goal;
+            const disp = document.getElementById('goalDisplay');
+            const setter = document.getElementById('goalSetter');
+            if (!disp || !setter) return;
+            if (!goal) { disp.style.display = 'none'; setter.style.display = 'block'; return; }
+            disp.style.display = 'block'; setter.style.display = 'none';
+            document.getElementById('goalCurrent').textContent = money(currentNW);
+            document.getElementById('goalTarget').textContent = 'Goal: ' + money(goal.target);
+            document.getElementById('goalFill').style.width = Math.min(100, goal.progress) + '%';
+            let meta = `<strong>${goal.progress}%</strong> there.`;
+            if (goal.reached) meta = '🎉 Goal reached!';
+            else if (goal.projected_date) meta += ` On track to hit it around <strong>${goal.projected_date}</strong> (${goal.months_to_go} months).`;
+            else meta += ' Add recurring income to project a finish date.';
+            document.getElementById('goalMeta').innerHTML = meta;
+        };
+        window.saveGoal = function () {
+            const val = document.getElementById('goalInput').value;
+            fetch('/api/goal', { method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ target: val, currency: window.DISP.ccy }) })
+                .then(r => r.json()).then(d => {
+                    if (d.error) { alert(d.error); return; }
+                    loadRecurringSummary();
+                }).catch(e => alert('Error: ' + e));
+        };
+        window.editGoal = function () {
+            document.getElementById('goalDisplay').style.display = 'none';
+            document.getElementById('goalSetter').style.display = 'block';
+            if (window.__goal) document.getElementById('goalInput').value = window.__goal.target;
+        };
+
+        // ---------- Enhanced net-worth trend (override) ----------
+        window.__trendRange = 'ALL';
+        window.__stacked = false;
+        function rangeCutoff(range) {
+            if (range === 'ALL') return null;
+            const d = new Date();
+            const map = { '1M': 1, '3M': 3, '6M': 6, '1Y': 12 };
+            d.setMonth(d.getMonth() - (map[range] || 0));
+            return d.toISOString().slice(0, 10);
+        }
+        window.__renderTrend = function () {
+            const canvas = document.getElementById('netWorthChart');
+            const empty = document.getElementById('trendEmpty');
+            if (!canvas) return;
+            let history = window.__history || [];
+            const projection = window.__projection || [];
+            const cutoff = rangeCutoff(window.__trendRange);
+            if (cutoff) history = history.filter(h => h.date >= cutoff);
+            if ((history.length + (window.__stacked ? 0 : projection.length)) < 2 && !(window.__stacked && history.length >= 2)) {
+                if (history.length < 2) { canvas.style.display = 'none'; if (empty) empty.style.display = 'block'; return; }
+            }
+            canvas.style.display = ''; if (empty) empty.style.display = 'none';
+            const ctx = canvas.getContext('2d');
+            if (window.__charts.trend) window.__charts.trend.destroy();
+
+            const zoomOpts = {
+                zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' },
+                pan: { enabled: true, mode: 'x' }
+            };
+
+            if (window.__stacked) {
+                const labels = history.map(h => h.date);
+                const keys = [['stocks','Stocks','#6b8db5'],['cryptos','Crypto','#c2984f'],
+                              ['savings','Cash','#52a963'],['real_estate','Real Estate','#8b7fb8']];
+                const datasets = keys.map(([k, label, color]) => ({
+                    label, data: history.map(h => (h.breakdown || {})[k] || 0),
+                    backgroundColor: color + 'cc', borderColor: color, fill: true, tension: 0.2, pointRadius: 0, stack: 's'
+                }));
+                window.__charts.trend = new Chart(ctx, {
+                    type: 'line', data: { labels, datasets },
+                    options: { responsive: true,
+                        plugins: { legend: { labels: { color: '#cbd5e1' } }, zoom: zoomOpts,
+                            tooltip: { callbacks: { label: c => `${c.dataset.label}: ${money(c.parsed.y)}` } } },
+                        scales: { x: { ticks: { color: '#9ca3af', maxTicksLimit: 10 }, grid: { color: 'rgba(255,255,255,0.05)' } },
+                            y: { stacked: true, ticks: { color: '#9ca3af', callback: v => money(v) }, grid: { color: 'rgba(255,255,255,0.05)' } } } }
+                });
+                setTrendBadge(history.map(h => h.grand_total));
+                return;
+            }
+
+            const actualDates = history.map(h => h.date);
+            const actualVals = history.map(h => h.grand_total);
+            const lastDate = actualDates.length ? actualDates[actualDates.length - 1] : null;
+            const lastVal = actualVals.length ? actualVals[actualVals.length - 1] : (projection[0] ? projection[0].net_worth : 0);
+            const projFuture = projection.filter(p => !lastDate || p.date > lastDate);
+            const labels = actualDates.concat(projFuture.map(p => p.date));
+            const actualData = actualVals.concat(projFuture.map(() => null));
+            const projData = actualDates.map((_, i) => i === actualDates.length - 1 ? lastVal : null).concat(projFuture.map(p => p.net_worth));
+            const grad = ctx.createLinearGradient(0, 0, 0, 240);
+            grad.addColorStop(0, 'rgba(74,144,226,0.35)'); grad.addColorStop(1, 'rgba(74,144,226,0)');
+
+            window.__charts.trend = new Chart(ctx, {
+                type: 'line',
+                data: { labels, datasets: [
+                    { label: 'Net Worth', data: actualData, borderColor: '#4a90e2', backgroundColor: grad, fill: true, tension: 0.25, pointRadius: 2, borderWidth: 2 },
+                    { label: 'Projected', data: projData, borderColor: '#8a9ba8', borderDash: [6,5], fill: false, tension: 0.25, pointRadius: 0, borderWidth: 2, spanGaps: true },
+                ]},
+                options: {
+                    responsive: true,
+                    onClick: (evt, els) => {
+                        if (!els.length) return;
+                        const idx = els[0].index;
+                        const h = history[idx];
+                        const box = document.getElementById('trendPointDetail');
+                        if (!h || !box) return;
+                        const b = h.breakdown || {};
+                        box.style.display = 'block';
+                        box.innerHTML = `<strong>${h.date}</strong> — Net worth ${money(h.grand_total)}<br>` +
+                            `Stocks ${money(b.stocks)} · Crypto ${money(b.cryptos)} · Cash ${money(b.savings)} · Real Estate ${money(b.real_estate)} · Loans ${money(b.loans)}`;
+                    },
+                    plugins: {
+                        legend: { labels: { color: '#9ca3af', boxWidth: 18 } },
+                        zoom: zoomOpts,
+                        tooltip: { callbacks: { label: c => (c.dataset.label ? c.dataset.label + ': ' : '') + money(c.parsed.y) } }
+                    },
+                    scales: {
+                        x: { ticks: { color: '#9ca3af', maxTicksLimit: 10 }, grid: { color: 'rgba(255,255,255,0.05)' } },
+                        y: { ticks: { color: '#9ca3af', callback: v => money(v) }, grid: { color: 'rgba(255,255,255,0.05)' } }
+                    }
+                }
+            });
+            setTrendBadge(actualVals, projFuture.map(p => p.net_worth));
+        };
+        function setTrendBadge(actual, proj) {
+            const badge = document.getElementById('trendChange');
+            if (!badge) return;
+            let base, end, tag = '';
+            if (actual.length >= 2) { base = actual[0]; end = actual[actual.length - 1]; }
+            else if (proj && proj.length) { base = actual[0] || proj[0]; end = proj[proj.length - 1]; tag = ' (proj.)'; }
+            else { badge.textContent = '—'; return; }
+            const diff = end - base, p = base ? diff / Math.abs(base) * 100 : 0, up = diff >= 0;
+            badge.textContent = (up ? '▲ ' : '▼ ') + money(Math.abs(diff)) + ` (${up ? '+' : '−'}${Math.abs(p).toFixed(1)}%)` + tag;
+            badge.style.color = up ? '#52a963' : '#e07a7a';
+        }
+        function initTrendControls() {
+            const rangeWrap = document.getElementById('trendRange');
+            if (rangeWrap) rangeWrap.querySelectorAll('.chip').forEach(chip => chip.addEventListener('click', () => {
+                rangeWrap.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
+                chip.classList.add('active');
+                window.__trendRange = chip.getAttribute('data-range');
+                window.__renderTrend();
+            }));
+            const st = document.getElementById('stackedToggle');
+            if (st) st.addEventListener('click', () => { window.__stacked = !window.__stacked; st.classList.toggle('active', window.__stacked); window.__renderTrend(); });
+            const zr = document.getElementById('zoomReset');
+            if (zr) zr.addEventListener('click', () => { try { window.__charts.trend.resetZoom(); } catch (e) {} });
+        }
+
+        // ---------- Sortable holdings tables ----------
+        window.initSortable = function () {
+            document.querySelectorAll('[data-tab="holdings"] table.category-table, #realEstateContent table.category-table').forEach(table => {
+                const ths = table.querySelectorAll('thead th');
+                ths.forEach((th, idx) => {
+                    if (!th.textContent.trim() || th.dataset.sortInit) return;
+                    th.dataset.sortInit = '1';
+                    th.classList.add('sortable');
+                    th.addEventListener('click', () => sortTable(table, idx, th));
+                });
+            });
+        };
+        function sortTable(table, col, th) {
+            const tbody = table.querySelector('tbody');
+            if (!tbody) return;
+            const asc = th.dataset.asc !== 'true';
+            table.querySelectorAll('thead th').forEach(h => { h.dataset.asc = ''; const a = h.querySelector('.arrow'); if (a) a.remove(); });
+            th.dataset.asc = asc ? 'true' : 'false';
+            th.insertAdjacentHTML('beforeend', ` <span class="arrow">${asc ? '▲' : '▼'}</span>`);
+            const rows = Array.from(tbody.querySelectorAll('tr'));
+            const num = s => { const n = parseFloat((s || '').replace(/[^0-9.\-]/g, '')); return isNaN(n) ? null : n; };
+            rows.sort((r1, r2) => {
+                const a = (r1.children[col] ? r1.children[col].textContent : '').trim();
+                const b = (r2.children[col] ? r2.children[col].textContent : '').trim();
+                const na = num(a), nb = num(b);
+                let cmp = (na !== null && nb !== null) ? na - nb : a.localeCompare(b);
+                return asc ? cmp : -cmp;
+            });
+            rows.forEach(r => tbody.appendChild(r));
+        }
+
+        // ---------- Ledger with search (override) ----------
+        window.__ledgerRows = [];
+        window.loadLedger = function (ccy) {
+            ccy = ccy || window.DISP.ccy;
+            fetch('/api/recurring/ledger?currency=' + encodeURIComponent(ccy))
+                .then(r => r.json())
+                .then(d => { window.__ledgerRows = (d && d.ledger) || []; renderLedger(); })
+                .catch(e => console.error('ledger', e));
+        };
+        window.renderLedger = function () {
+            const el = document.getElementById('ledgerList');
+            if (!el) return;
+            const q = (document.getElementById('ledgerSearch') || {}).value || '';
+            const ql = q.toLowerCase();
+            let rows = window.__ledgerRows;
+            if (ql) rows = rows.filter(e =>
+                (e.name || '').toLowerCase().includes(ql) ||
+                (e.account_name || '').toLowerCase().includes(ql) ||
+                (e.account_institution || '').toLowerCase().includes(ql) ||
+                (e.type || '').toLowerCase().includes(ql));
+            if (!rows.length) { el.innerHTML = q ? 'No matching transactions.' : 'No transactions posted yet. Recurring income and expenses post automatically when due.'; el.style.padding = '20px'; el.style.textAlign = 'center'; return; }
+            const acctCell = (n, i) => i ? `<strong>${n}</strong><br><small style="color:#9ca3af;">${i}</small>` : `<strong>${n}</strong>`;
+            const body = rows.map(e => {
+                const income = e.type === 'income', color = income ? '#52a963' : '#e07a7a', sign = income ? '+' : '−';
+                return `<tr>
+                    <td style="padding:8px 12px;">${e.date}</td>
+                    <td style="padding:8px 12px;"><strong>${e.name}</strong></td>
+                    <td style="padding:8px 12px;">${acctCell(e.account_name || 'Unknown', e.account_institution)}</td>
+                    <td style="padding:8px 12px; text-align:right; color:${color};">${sign}${money(Math.abs(e.display_amount))}</td>
+                    <td style="padding:8px 12px; text-align:right;"><small>${e.account_currency} ${Number(e.resulting_balance).toLocaleString(undefined,{maximumFractionDigits:2})}</small></td>
+                </tr>`;
+            }).join('');
+            el.innerHTML = `<table class="category-table"><thead><tr>
+                <th style="padding:8px 12px;">Date</th><th style="padding:8px 12px;">Transaction</th>
+                <th style="padding:8px 12px;">Account</th><th style="padding:8px 12px; text-align:right;">Amount</th>
+                <th style="padding:8px 12px; text-align:right;">Balance after</th></tr></thead><tbody>${body}</tbody></table>`;
+            el.style.padding = '0'; el.style.textAlign = 'left';
+        };
+
+        // ---------- Instant currency switch ----------
+        window.changeCurrency = function () {
+            const sel = document.getElementById('currencySelect');
+            const ccy = sel.value;
+            window.DISP = { ccy, sym: SYMBOLS[ccy] || (ccy + ' ') };
+            try { const u = new URL(window.location); u.searchParams.set('currency', ccy); history.replaceState(null, '', u); } catch (e) {}
+            fetch('/api/portfolio?currency=' + encodeURIComponent(ccy))
+                .then(r => r.json())
+                .then(data => { renderHoldings(data); })
+                .catch(e => console.error('portfolio', e));
+            fetch('/api/portfolio/history?currency=' + encodeURIComponent(ccy))
+                .then(r => r.json()).then(d => { window.__history = (d && d.history) || []; window.__renderTrend(); });
+            loadAllocation(ccy); loadCashflow(ccy); loadRecurringSummary(ccy); loadLedger(ccy);
+        };
+
+        function emptyState(icon, title, sub) {
+            return `<div style="padding:30px; text-align:center; color:#9ca3af;"><div style="font-size:3em; margin-bottom:10px;">${icon}</div><div>${title}</div><small>${sub}</small></div>`;
+        }
+        function actionCells(cat, id) {
+            return `<td><button class="btn btn-small danger" onclick="deleteEntry('${cat}','${id}')" style="padding:4px 8px; font-size:12px;" title="Delete">✕</button></td>
+                    <td><button class="btn btn-small" onclick="editEntry('${cat}','${id}')" style="padding:4px 8px; font-size:12px;" title="Edit">✏️</button></td>`;
+        }
+        window.renderHoldings = function (data) {
+            const t = data.totals || {};
+            // Headline numbers
+            const set = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = money(v); };
+            set('stickyNetWorth', t.grand_total); set('nwGrand', t.grand_total);
+            set('nwInvest', (t.stocks || 0) + (t.cryptos || 0)); set('nwRealEstate', t.real_estate);
+            set('nwSavings', t.savings); set('nwLoans', t.loans);
+            set('stocksTotal', t.stocks); set('cryptosTotal', t.cryptos); set('savingsTotal', t.savings);
+            set('loansTotal', t.loans); set('realEstateTotal', t.real_estate);
+
+            const S = document.getElementById('stocksContent');
+            if (S) S.innerHTML = (data.stocks && data.stocks.length) ? tbl(['','','Symbol','Shares','Value'],
+                data.stocks.map(s => `<tr>${actionCells('stocks', s.id)}<td><strong style="color:#007bff;">${s.symbol}</strong></td><td>${Number(s.shares).toFixed(2)}</td><td><strong>${money(s.market_value, 2)}</strong></td></tr>`))
+                : emptyState('📈', 'No stocks in portfolio', 'Start investing for your future!');
+
+            const C = document.getElementById('cryptosContent');
+            if (C) C.innerHTML = (data.cryptos && data.cryptos.length) ? tbl(['','','Symbol','Amount','Value'],
+                data.cryptos.map(c => `<tr>${actionCells('cryptos', c.id)}<td><strong style="color:#f7931a;">${c.symbol}</strong></td><td>${c.amount}</td><td><strong>${money(c.market_value, 2)}</strong></td></tr>`))
+                : emptyState('₿', 'No cryptocurrencies', 'Digital assets for diversification');
+
+            const SV = document.getElementById('savingsContent');
+            if (SV) SV.innerHTML = (data.savings && data.savings.length) ? tbl(['','','Account','Institution','Balance'],
+                data.savings.map(a => `<tr>${actionCells('savings', a.id)}<td><strong>${a.name}</strong></td><td><small>${a.institution || ''}</small></td><td><strong>${money(a.display_value, 2)}</strong></td></tr>`))
+                : emptyState('💳', 'No savings accounts', 'Add accounts using the form below');
+
+            const L = document.getElementById('loansContent');
+            if (L) L.innerHTML = (data.loans && data.loans.length) ? tbl(['','','Loan','Outstanding','Rate'],
+                data.loans.map(l => `<tr>${actionCells('loans', l.id)}<td><strong>${l.name}</strong></td><td style="color:#dc3545;"><strong>${money(l.display_value, 2)}</strong></td><td>${l.interest_rate}%</td></tr>`))
+                : emptyState('📉', 'No loans recorded', 'No debt is good debt! 🎉');
+
+            const R = document.getElementById('realEstateContent');
+            if (R) R.innerHTML = (data.real_estate && data.real_estate.length) ? tbl(['','','Property','Market Value','Equity'],
+                data.real_estate.map(p => `<tr>${actionCells('real_estate', p.id)}<td><strong>${p.name}</strong></td><td><strong>${money(p.display_value, 2)}</strong></td><td style="color:${p.equity > 0 ? '#28a745' : '#6c757d'};"><strong>${money(p.equity, 2)}</strong></td></tr>`))
+                : emptyState('🏠', 'No real estate properties', 'Add properties using the form below');
+
+            initSortable();
+        };
+        function tbl(headers, rows) {
+            return `<table class="category-table"><thead><tr>${headers.map((h, i) =>
+                `<th${i < 2 ? ' style="width:30px;"' : ''}>${h}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table>`;
+        }
+
+        // ---------- Extend recurring summary (override to add rate/runway/goal) ----------
+        window.loadRecurringSummary = function (ccy) {
+            ccy = ccy || window.DISP.ccy;
+            fetch('/api/recurring/summary?currency=' + encodeURIComponent(ccy))
+                .then(r => r.json())
+                .then(s => {
+                    const setTxt = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
+                    setTxt('cfIncome', '+' + money(s.monthly_income));
+                    setTxt('cfExpenses', '−' + money(s.monthly_expenses));
+                    const net = document.getElementById('cfNet');
+                    if (net) { net.textContent = (s.monthly_net >= 0 ? '+' : '−') + money(Math.abs(s.monthly_net)); net.className = s.monthly_net >= 0 ? 'stat-positive' : 'stat-negative'; }
+                    setTxt('cfAnnual', (s.annual_net >= 0 ? '+' : '−') + money(Math.abs(s.annual_net)) + ' / year');
+                    setTxt('cfRate', s.savings_rate == null ? '—' : s.savings_rate + '%');
+                    setTxt('cfRunway', s.runway_months == null ? '∞' : s.runway_months + ' mo');
+                    window.__projection = s.projection || [];
+                    renderGoal(s.goal, s.current_net_worth);
+                    renderUpcoming(s.upcoming || []);
+                    if (window.__renderTrend) window.__renderTrend();
+                })
+                .catch(e => console.error('summary', e));
+        };
+        function renderUpcoming(list) {
+            const el = document.getElementById('upcomingList');
+            if (!el) return;
+            if (!list.length) { el.innerHTML = 'No upcoming recurring transactions. Add income or expenses to see a forecast.'; el.style.padding = '20px'; el.style.textAlign = 'center'; return; }
+            const acctCell = (n, i) => i ? `<strong>${n}</strong><br><small style="color:#9ca3af;">${i}</small>` : `<strong>${n}</strong>`;
+            const rows = list.map(u => {
+                const income = u.type === 'income', color = income ? '#52a963' : '#e07a7a', sign = income ? '+' : '−';
+                return `<tr><td style="padding:8px 12px;">${u.date}</td><td style="padding:8px 12px;"><strong>${u.name}</strong></td>
+                    <td style="padding:8px 12px;">${acctCell(u.account_name || 'Unknown', u.account_institution)}</td>
+                    <td style="padding:8px 12px; text-align:right; color:${color};">${sign}${money(Math.abs(u.amount))}</td></tr>`;
+            }).join('');
+            el.innerHTML = `<table class="category-table"><thead><tr><th style="padding:8px 12px;">Date</th><th style="padding:8px 12px;">Transaction</th><th style="padding:8px 12px;">Account</th><th style="padding:8px 12px; text-align:right;">Amount</th></tr></thead><tbody>${rows}</tbody></table>`;
+            el.style.padding = '0'; el.style.textAlign = 'left';
+        }
+
+        // ---------- Init ----------
+        document.addEventListener('DOMContentLoaded', function () {
+            let tab = 'overview';
+            try { tab = localStorage.getItem('nw_tab') || 'overview'; } catch (e) {}
+            showTab(tab);
+            initCollapsible();
+            initTrendControls();
+            initSortable();
+            loadAllocation();
+            loadCashflow();
+            // loadRecurringSummary & loadLedger are also called by the existing init,
+            // but call here too so overrides run with full analytics.
+            loadRecurringSummary();
+            loadLedger();
+        });
+    })();
     </script>
 
     <!-- Edit Entry Modal -->
@@ -1110,93 +1725,10 @@
             loadLedger();
         });
 
-        function loadLedger() {
-            fetch('/api/recurring/ledger?currency=' + encodeURIComponent(NW_CURRENCY))
-                .then(r => r.json())
-                .then(data => {
-                    const el = document.getElementById('ledgerList');
-                    const rows = (data && data.ledger) || [];
-                    if (rows.length === 0) {
-                        el.innerHTML = 'No transactions posted yet. Recurring income and expenses post to their account automatically when they come due.';
-                        return;
-                    }
-                    const sym = NW_SYMBOL;
-                    const money = v => sym + Number(Math.abs(v)).toLocaleString(undefined, {maximumFractionDigits: 2});
-                    const body = rows.map(e => {
-                        const income = e.type === 'income';
-                        const color = income ? '#52a963' : '#e07a7a';
-                        const sign = income ? '+' : '−';
-                        return `<tr>
-                            <td style="padding:8px 12px;">${e.date}</td>
-                            <td style="padding:8px 12px;"><strong>${e.name}</strong></td>
-                            <td style="padding:8px 12px;"><strong>${e.account_name}</strong>${e.account_institution ? `<br><small style="color:#9ca3af;">${e.account_institution}</small>` : ''}</td>
-                            <td style="padding:8px 12px; text-align:right; color:${color};">${sign}${money(e.display_amount)}</td>
-                            <td style="padding:8px 12px; text-align:right;"><small>${e.account_currency} ${Number(e.resulting_balance).toLocaleString(undefined,{maximumFractionDigits:2})}</small></td>
-                        </tr>`;
-                    }).join('');
-                    el.innerHTML = `<table class="category-table">
-                        <thead><tr>
-                            <th style="padding:8px 12px;">Date</th>
-                            <th style="padding:8px 12px;">Transaction</th>
-                            <th style="padding:8px 12px;">Account</th>
-                            <th style="padding:8px 12px; text-align:right;">Amount</th>
-                            <th style="padding:8px 12px; text-align:right;">Balance after</th>
-                        </tr></thead>
-                        <tbody>${body}</tbody></table>`;
-                    el.style.padding = '0';
-                    el.style.textAlign = 'left';
-                })
-                .catch(err => console.error('Error loading ledger:', err));
-        }
-
-        function loadRecurringSummary() {
-            fetch('/api/recurring/summary?currency=' + encodeURIComponent(NW_CURRENCY))
-                .then(r => r.json())
-                .then(s => {
-                    const sym = NW_SYMBOL;
-                    const money = v => sym + Number(v).toLocaleString(undefined, {maximumFractionDigits: 0});
-                    document.getElementById('cfIncome').textContent = '+' + money(s.monthly_income);
-                    document.getElementById('cfExpenses').textContent = '−' + money(s.monthly_expenses);
-                    const net = document.getElementById('cfNet');
-                    net.textContent = (s.monthly_net >= 0 ? '+' : '−') + money(Math.abs(s.monthly_net));
-                    net.className = s.monthly_net >= 0 ? 'stat-positive' : 'stat-negative';
-                    document.getElementById('cfAnnual').textContent =
-                        (s.annual_net >= 0 ? '+' : '−') + money(Math.abs(s.annual_net)) + ' / year';
-
-                    const list = document.getElementById('upcomingList');
-                    if (!s.upcoming || s.upcoming.length === 0) {
-                        list.innerHTML = 'No upcoming recurring transactions. Add income or expenses above to see a forecast.';
-                    } else {
-                        const acctCell = (name, inst) => inst
-                            ? `<strong>${name}</strong><br><small style="color:#9ca3af;">${inst}</small>`
-                            : `<strong>${name}</strong>`;
-                        const rows = s.upcoming.map(u => {
-                            const income = u.type === 'income';
-                            const color = income ? '#52a963' : '#e07a7a';
-                            const sign = income ? '+' : '−';
-                            return `<tr>
-                                <td style="padding:8px 12px;">${u.date}</td>
-                                <td style="padding:8px 12px;"><strong>${u.name}</strong></td>
-                                <td style="padding:8px 12px;">${acctCell(u.account_name || 'Unknown', u.account_institution)}</td>
-                                <td style="padding:8px 12px; text-align:right; color:${color};">${sign}${money(Math.abs(u.amount))}</td>
-                            </tr>`;
-                        }).join('');
-                        list.innerHTML = `<table class="category-table">
-                            <thead><tr>
-                                <th style="padding:8px 12px;">Date</th>
-                                <th style="padding:8px 12px;">Transaction</th>
-                                <th style="padding:8px 12px;">Account</th>
-                                <th style="padding:8px 12px; text-align:right;">Amount</th>
-                            </tr></thead>
-                            <tbody>${rows}</tbody></table>`;
-                        list.style.padding = '0';
-                        list.style.textAlign = 'left';
-                    }
-                    window.__projection = s.projection || [];
-                    if (window.__renderTrend) window.__renderTrend();
-                })
-                .catch(err => console.error('Error loading recurring summary:', err));
-        }
+        // loadLedger() and loadRecurringSummary() are defined (enhanced: search,
+        // savings-rate/runway, goals, instant-currency) in the interactive
+        // dashboard script above; the older versions were removed to avoid
+        // overriding them.
 
         function loadAccounts() {
             // Extract accounts from the savings data already available

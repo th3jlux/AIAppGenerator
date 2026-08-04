@@ -36,4 +36,7 @@ class Config:
 
     # --- OpenAI ---
     OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
-    OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o")
+    # gpt-4o-mini has a much higher tokens-per-minute limit than the larger models
+    # (200k vs ~30k on standard tiers). The page-editor sends the whole file as
+    # context (tens of thousands of tokens), so a low-TPM model 429s every request.
+    OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")

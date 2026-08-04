@@ -6,6 +6,22 @@ import subprocess
 
 from openai import OpenAI
 
+try:  # OpenAI SDK v1 exception types (present in normal installs)
+    from openai import (
+        AuthenticationError,
+        RateLimitError,
+        APIConnectionError,
+        APITimeoutError,
+        PermissionDeniedError,
+        NotFoundError,
+        APIStatusError,
+    )
+except Exception:  # pragma: no cover - defensive for unusual SDK versions
+    class _MissingOpenAIError(Exception):
+        pass
+    AuthenticationError = RateLimitError = APIConnectionError = APITimeoutError = \
+        PermissionDeniedError = NotFoundError = APIStatusError = _MissingOpenAIError
+
 from config import Config
 
 routes_dir = Config.ROUTES_DIR
@@ -26,7 +42,9 @@ def _client():
             "OPENAI_API_KEY is not set. Copy .env.example to .env and add your key "
             "(get one at https://platform.openai.com/api-keys)."
         )
-    return OpenAI(api_key=Config.OPENAI_API_KEY)
+    # Fail fast: short timeout and a single retry so a bad key/quota surfaces a
+    # clear error in seconds instead of spamming retries and hanging the request.
+    return OpenAI(api_key=Config.OPENAI_API_KEY, timeout=30, max_retries=1)
 
 
 def sanitize_route_name(name):
@@ -172,29 +190,61 @@ SYSTEM_PROMPT = """You are an assistant that generates self-contained Flask util
 """
 
 
+def _friendly_openai_error(exc):
+    """Translate an OpenAI SDK exception into an actionable, user-facing message."""
+    model = Config.OPENAI_MODEL
+    if isinstance(exc, AuthenticationError):
+        return ("OpenAI rejected the API key (401). Check OPENAI_API_KEY in your .env "
+                "is correct and active.")
+    if isinstance(exc, RateLimitError):
+        # 429 covers both hard rate-limiting and (much more commonly) an account
+        # with no remaining credit / no billing set up.
+        detail = getattr(exc, "message", "") or str(exc)
+        if "insufficient_quota" in detail or "quota" in detail.lower():
+            return ("OpenAI returned 'insufficient quota' (429): this key's account has no "
+                    "remaining credits. Add a payment method or credits at "
+                    "https://platform.openai.com/account/billing, then retry.")
+        return ("OpenAI is rate-limiting these requests (429). Wait a moment and retry; if it "
+                "persists, check your usage limits and billing at platform.openai.com.")
+    if isinstance(exc, (PermissionDeniedError, NotFoundError)):
+        return (f"The model '{model}' isn't available to this key/project. Enable it for the "
+                f"project, or set OPENAI_MODEL in .env to one you can access (e.g. gpt-4o-mini).")
+    if isinstance(exc, (APIConnectionError, APITimeoutError)):
+        return ("Could not reach OpenAI (network/timeout). Check your internet connection or "
+                "any proxy/firewall, then retry.")
+    if isinstance(exc, APIStatusError):
+        status = getattr(exc, "status_code", "?")
+        return f"OpenAI returned an error (HTTP {status}): {getattr(exc, 'message', str(exc))}"
+    return f"Unexpected error calling OpenAI: {exc}"
+
+
 def generate_openai_response(prompt):
     """Generate Python and HTML code using the OpenAI API."""
-    response = _client().chat.completions.create(
-        model=Config.OPENAI_MODEL,
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": prompt},
-        ],
-        response_format={
-            "type": "json_schema",
-            "json_schema": {
-                "name": "flask_builder",
-                "schema": {
-                    "type": "object",
-                    "properties": {
-                        "python_code": {"type": "string"},
-                        "html_code": {"type": "string"},
-                        "pip_installs": {"type": "string"},
+    try:
+        response = _client().chat.completions.create(
+            model=Config.OPENAI_MODEL,
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ],
+            response_format={
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "flask_builder",
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "python_code": {"type": "string"},
+                            "html_code": {"type": "string"},
+                            "pip_installs": {"type": "string"},
+                        },
                     },
                 },
             },
-        },
-    )
+        )
+    except (AuthenticationError, RateLimitError, APIConnectionError, APITimeoutError,
+            PermissionDeniedError, NotFoundError, APIStatusError) as exc:
+        raise RuntimeError(_friendly_openai_error(exc)) from exc
 
     response_content = response.choices[0].message.content.strip()
 
